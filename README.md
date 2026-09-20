@@ -418,7 +418,7 @@ says that accuracy is the wrong metric there; balanced accuracy (mean per-class 
 them does not help: a majority vote (ties broken by the most confident system) scores 0.666 / 0.738 /
 0.535 / 0.747 on emotion / `tweet_topic` / `fin_topic` / `daily_dialog`, and averaging the three
 probability vectors 0.674 / 0.744 / 0.548 / 0.753, both below the best single system on every dataset
-(0.725 / 0.793 / 0.670 / 0.765). The any-correct oracle is much higher (0.805 / 0.871 / 0.756 / 0.884),
+(0.725 / 0.793 / 0.670 / 0.765). The any-correct oracle is much higher (0.806 / 0.871 / 0.756 / 0.884),
 so the systems do fail on different rows, but nothing in their confidences tells you which one to trust
 on a given row.
 
@@ -445,14 +445,14 @@ dataset, is the honest comparator for anyone who has labels:
 - Labels are prompts. The label string is the model input, and it is fragile: PrismNLI collapses to
   `Markets` because "The topic of this tweet is Markets." is entailed by almost any finance tweet; one
   line of definitions moved accuracy by 1 to 2 points in opposite directions for different systems
-  (`defined` variant); Laya's own `BENCHMARKS.md` reports prediction flips from option order alone of 4% on DAIR Emotion and 15% on MASSIVE intent for the English checkpoint. None of
+  (`defined` variant); Laya's own `BENCHMARKS.md` (order-stability table, English checkpoint) reports prediction flips from option order alone of 4% on DAIR Emotion (n = 200) and 15% on MASSIVE intent. None of
   this exists for a trained classifier, whose classes are indices.
 - Output format artefacts. Jev returns probabilities rounded to 2 decimals, so 15% of emotion rows and
   51% of Laya's `fin_topic` rows put exactly zero on the true label; log-loss is then undefined without
   clipping, and "confidence" from the API is a different quantity from max-probability.
 - Closed weights and moving versions. Jev's architecture, size and training data are undisclosed;
-  the alias `typesafe/jev-1.13` already resolves to a dated snapshot (`-20260917`) two days after
-  release; results cannot be reproduced once the snapshot is retired, data leaves your infrastructure,
+  the alias `typesafe/jev-1.13` resolves to a dated snapshot (`-20260917`), i.e. it is a moving
+  pointer; results cannot be reproduced once the snapshot is retired, data leaves your infrastructure,
   and end-to-end latency is 330 to 350 ms per decision from this client versus sub-millisecond for a
   linear model. Contamination is unverifiable for Jev and Laya, so any public-benchmark number for
   them (including ours) carries an unknown exposure risk.
@@ -464,7 +464,7 @@ body, and it can change per call. Typed, schema-constrained outputs with a proba
 (nothing to parse, no free-text hallucination, and the distribution is at least monotone with
 accuracy: Jev's accuracy among its 50% most confident decisions is 0.954 on `tweet_topic` and 0.828 on
 `fin_topic`). Several questions in one call. Fast and cheap relative to a generative LLM: Jev cost
-$0.015 to $0.020 per 1000 decisions here and answered in about a third of a second. Robustness to
+$0.014 to $0.020 per 1000 decisions here and answered in about a third of a second. Robustness to
 distribution drift where a trained model degrades: on `tweet_topic`, whose test tweets are a year
 later than its training tweets, zero-shot Jev (0.793) edges the supervised model (0.776) and leads it
 by 14 macro-F1 points. Open-weight alternatives exist (Laya, NLI classifiers) for self-hosting at
@@ -479,8 +479,8 @@ its calibration is dataset-dependent; and the "System One" framing describes a k
 classification with typed outputs, as in the Hugging Face zero-shot pipeline, GLiNER, or
 constrained-decoding classifiers) with better ergonomics, calibration-aware training (RLCD) and an
 aggressive price. Two external facts fit this reading: TechCrunch reports that outside observers
-suspect an open-weight LLM underneath, and JevBench's open Qwen3.5-4B rebuilds land within about one
-point of Jev on its composite score. The novelty is the product surface, not the model. The hedge is
+suspect an open-weight LLM underneath, and JevBench's open Qwen3.5-4B rebuild lands within about one point of
+Jev on its composite score (JevBench v1.2.2 README: Jev 1.13.0 75.3, SemIf on Qwen3.5-4B 74.6). The novelty is the product surface, not the model. The hedge is
 the scope of this study: four English classification datasets, the `choice` primitive only, one frozen
 prompt per dataset, no `noul` or `score` questions, no long structured state and no multi-question
 calls, which are the settings TypeSafe markets.
@@ -498,7 +498,7 @@ prompts differ"; the headline table does not. The follow-up datasets then show t
 result was the high point: on `tweet_topic` and `fin_topic` it is tied with PrismNLI and 16 to 33
 points behind Jev, on `daily_dialog` it is last, and on 20 labels its shipped temperature makes its
 probabilities unusable. Plausible reasons, none verifiable from the disclosures: a 421M encoder
-fine-tuned for two hours on about a dozen task families, one of which is an undisclosed "emotion and
+fine-tuned for two hours on the 13 task families listed in its `eval/results.md`, one of which is an undisclosed "emotion and
 tone" corpus that plausibly resembles DAIR-style data; temperature buckets fit on that mix; and
 latency and calibration claims in the article that compare Laya's on-GPU compute time with Jev's
 network round trip, and Laya's post-fit ECE with Jev's raw ECE. Laya is not an open approximation of
