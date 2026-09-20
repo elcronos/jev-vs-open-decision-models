@@ -1,5 +1,11 @@
 # Zero-shot emotion classification: Jev 1.13 vs PrismNLI-0.4B vs Laya
 
+> Scope note (added 2026-09-20): this report covers the primary `dair-ai/emotion` run only, and its
+> numbers are unchanged. The follow-up on three datasets absent from every disclosed training list
+> (`tweet_topic`, `fin_topic`, `daily_dialog`), on which the ranking reverses on the two topic sets
+> and splits by metric on the clean emotion set, is in [`REPORT_FOLLOWUP.md`](REPORT_FOLLOWUP.md).
+> The conclusions below are conclusions about this dataset.
+
 Apples-to-apples zero-shot benchmark on `dair-ai/emotion` (test split, n = 2000), run under the frozen protocol in `PROTOCOL.md` on 2026-09-20. All numbers in this report come from `results/summary.json` / `summary.csv` (checksummed copy of the primary run in `results/frozen_primary_plain/`), `results/supplementary.json`, `results/env.json`, `results/prismnli_pipeline_check.json`, `results/contamination_research.json`, `results/error_analysis.md` and `results/inspection_sample.md`. Third-party published figures appear only in Sections 5 and 6(c), never in the headline tables.
 
 Rounding: accuracy and F1 to 3 decimals, Brier / ECE / NLL to 3 decimals, latency to whole milliseconds, cost to 4 decimals USD.
@@ -320,13 +326,13 @@ Local compute (M1 Max, MPS, fp32, batch 1): Laya p50 31 ms, PrismNLI p50 58 ms; 
 - *Laya is an open-weight approximation of Jev's abstraction:* supported for accuracy (statistically indistinguishable, McNemar p = 1.000, paired CI includes 0, 69% prediction agreement) but not for calibration or error profile (Laya is worse calibrated on `plain` though not on `defined`, makes more errors at 50% coverage, and has a distinct fear->sadness failure).
 - *The three approaches have different strengths:* partly supported. PrismNLI leads on every quality metric; Laya leads on local latency and cost; Jev leads only on ergonomics. Jev and Laya are statistically indistinguishable in accuracy and both far below PrismNLI, and Jev's calibration is not better than PrismNLI's here.
 
-The bound on this conclusion is the PrismNLI contamination finding: its initialisation checkpoint saw part of dair-ai/emotion train + validation (bounded in Section 5) with a similar declarative emotion-hypothesis template (training: "This example tweet expresses the emotion: {label}"; ours: "The primary emotion expressed in this text is {label}."), so an unknown but non-zero part of its 14-point lead is dataset familiarity rather than zero-shot capability. The `defined` variant (a different template) cost PrismNLI 2.3 points, which is consistent with, but not proof of, template familiarity. The clean test is a re-run on an emotion dataset of different provenance.
+The bound on this conclusion is the PrismNLI contamination finding: its initialisation checkpoint saw part of dair-ai/emotion train + validation (bounded in Section 5) with a similar declarative emotion-hypothesis template (training: "This example tweet expresses the emotion: {label}"; ours: "The primary emotion expressed in this text is {label}."), so an unknown but non-zero part of its 14-point lead is dataset familiarity rather than zero-shot capability. The `defined` variant (a different template) cost PrismNLI 2.3 points, which is consistent with, but not proof of, template familiarity. The clean test is a re-run on datasets of different provenance; it has since been run (`REPORT_FOLLOWUP.md` Section 5): on two topic sets Jev is 16 and 32 accuracy points ahead of PrismNLI, and on a clean emotion set (`daily_dialog`) PrismNLI is more accurate while Jev has the higher macro-F1, so the verdicts above hold for this dataset and not in general.
 
 ---
 
 ## 7. Limitations
 
-- Single dataset, single domain (Twitter, 2018), six labels; no claim generalises beyond it.
+- Single dataset, single domain (Twitter, 2018), six labels; no claim generalises beyond it. Three further datasets are evaluated in `REPORT_FOLLOWUP.md` (Section 5 there revisits the questions of Section 6).
 - Gold labels come from hashtag distant supervision; 389 rows defeat all three systems and the 22-row inspection sample (Section 4.11) shows many are label noise, so absolute accuracies are bounded below 1 by the data.
 - Contamination: verified inherited exposure for PrismNLI (train/validation); unverifiable claims for Laya and Jev.
 - Jev returns probabilities rounded to 2 decimals; 15.1% of rows have p_gold = 0 exactly, which inflates NLL by construction (eps table) and coarsens ECE bins. Laya rounds to 4 decimals (1.3% exact zeros).

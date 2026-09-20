@@ -1,7 +1,10 @@
-# model_decisions: zero-shot emotion classification benchmark
+# model_decisions: zero-shot classification benchmark (Jev 1.13 vs PrismNLI-0.4B vs Laya)
 
-Head-to-head, zero-shot evaluation of three "decision" systems on six-way emotion classification
-(`dair-ai/emotion`, test split, 2000 rows):
+Head-to-head, zero-shot evaluation of three "decision" systems. The primary run is six-way emotion
+classification (`dair-ai/emotion`, test split, 2000 rows) under `PROTOCOL.md`, in two prompt
+variants; a follow-up under `PROTOCOL_ADDENDUM_v2.md` adds three datasets absent from every
+disclosed training list of the three systems (`tweet_topic`, `fin_topic`, `daily_dialog`: 6 / 20 / 7
+classes, n = 1693 / 4117 / 7740, `plain` variant only). The systems:
 
 | System | Kind | Where it runs |
 |---|---|---|
@@ -9,9 +12,10 @@ Head-to-head, zero-shot evaluation of three "decision" systems on six-way emotio
 | **Laya** (`convaiinnovations/laya`, repo root checkpoint) | local, `laya` library | Apple MPS |
 | **PrismNLI-0.4B** (`Jaehun/PrismNLI-0.4B`) | local, NLI zero-shot via `transformers` | Apple MPS |
 
-Every system gets the same raw text, the same instruction and the same six labels; nothing is
-trained or tuned. Each is run twice: `plain` (bare label names, the headline) and `defined`
-(each label carries a frozen one-line definition).
+Every system gets the same raw text, the same instruction and the same label strings; nothing is
+trained or tuned. On the primary dataset each is run twice: `plain` (bare label names, the headline)
+and `defined` (each label carries a frozen one-line definition); the follow-up datasets have `plain`
+only.
 
 ## Frozen protocol
 
@@ -22,9 +26,10 @@ inference and may not change afterwards; any deviation must be recorded in
 `results/deviations.md`. `models/common.py` holds the shared constants and dataclasses that all
 modules implement against.
 
-## Dataset selection
+## Primary dataset selection
 
-The benchmark needs one dataset that is fair to all three systems at once: a proprietary
+The primary run needed one dataset that is fair to all three systems at once (the follow-up datasets
+are covered under "Dataset constraints" below): a proprietary
 decision model reached only through an API (Jev), a binary NLI classifier that scores each label
 as a hypothesis (PrismNLI), and an open non-autoregressive typed-decision model with a fixed
 option-token budget (Laya). Candidates were screened before any code was written, using the
@@ -62,25 +67,29 @@ for this report found that PrismNLI-0.4B is initialised from `deberta-v3-large-z
 `dair-ai/emotion` (never the test split). That lineage was not visible on the PrismNLI model card
 and was only established by tracing the initialisation checkpoint's dataset CSV and notebooks.
 The dataset was kept because the protocol was already frozen and because the exposure is bounded
-and documented; the report treats PrismNLI's lead as partly non-zero-shot for that reason. A
-follow-up on an emotion dataset absent from the `zeroshot-v2.0` list (the list covers 28 public
-classification sets, so candidates are scarce) is the clean next step.
+and documented; the report treats PrismNLI's lead as partly non-zero-shot for that reason. The
+follow-up on three datasets absent from every disclosed training list is reported in
+[`REPORT_FOLLOWUP.md`](REPORT_FOLLOWUP.md) (summary under "Results" below).
 
 ### Dataset constraints (follow-up datasets, `PROTOCOL_ADDENDUM_v2.md` §6)
 
 Three follow-up datasets were chosen because they are **absent from every disclosed training list**
-of the three systems. The evidence base is the same as Section 5 of `REPORT.md`
-(`results/contamination_research.json`): the pinned training CSV of
+of the three systems ("clean" in this README and in `REPORT_FOLLOWUP.md` means exactly this, not
+"verified unseen"). The evidence base is the same kind as Section 5 of `REPORT.md`: the pinned
+training CSV of
 `MoritzLaurer/deberta-v3-large-zeroshot-v2.0` (the checkpoint PrismNLI-0.4B is initialised from;
 the non-`-c` model was trained on every row with `used_in_v1.1 == TRUE`), the PrismNLI synthetic
 data seeds (WANLI only, per the dataset card and the paper), Laya's disclosed training mix (model
 card table plus the `in_training` flags hard-coded in its public eval harness
 `research/scripts/bench_apps.py`), and TypeSafe's statements about Jev's corpus (self-made,
-undisclosed). "Absent from disclosed lists" is the strongest statement available; it is not
-"never seen".
+undisclosed). The follow-up rows below were checked against the pinned CSV and the other sources at
+the time of the addendum but, unlike the `dair-ai/emotion` row, are not recorded verbatim in
+`results/contamination_research.json`. "Absent from disclosed lists" is the strongest statement
+available; it is not "never seen".
 
 | dataset (pinned) | evaluated split, n, classes | `deberta-v3-large-zeroshot-v2.0` training CSV (PrismNLI lineage) | PrismNLI synthetic seeds (WANLI) | Laya disclosed training mix / eval harness | Jev (TypeSafe) corpus | verdict |
 |---|---|---|---|---|---|---|
+| `dair-ai/emotion` @ `cab853a1` (**primary dataset, for contrast**) | `test`, 2000, 6 | listed as `emotion6_twitter` with **`used_in_v1.0/v1.1 = TRUE`**: train + validation splits were in the initialisation checkpoint's training pool (the card states up to 500 rows per class; not verifiable against the public notebook, whose saved output shows a 10,344-row `emotiondair` NLI pool) with a declarative emotion-hypothesis template; test split stated as held out | not a seed | card: held out | as below | **inherited exposure verified** (REPORT.md Section 5) |
 | `cardiffnlp/tweet_topic_single` @ `87b7a0d1` | `test_2021`, 1693, 6 | not in the CSV. The sister set `tweet_topic_multi` is listed with `used_in_v1.0/v1.1 = FALSE`, `future_use = excluded` ("multi-label"); the single-label set does not appear at all | WANLI is MNLI-style premise/hypothesis pairs, no tweet-topic data; "tweet"/"topic" absent from the PrismNLI card and paper | not in the model-card table (AG News, BoolQ in mix; DAIR Emotion, SST-5, prompt-injections held out) and not loaded by `bench_apps.py` / `build_benchmark_nb.py`; the dev.to description names intents, NLI, safety, email triage, no tweet topics | training data "made ourselves", no corpus or benchmark named; no public-benchmark policy | absent from all disclosed lists |
 | `zeroshot/twitter-financial-news-topic` @ `acbc8af2` | `validation`, 4117, 20 | listed as `twitter_financial_news_topic` with `used_in_v1.0/v1.1 = FALSE`, `future_use = excluded` ("data source and task definition too unclear"); i.e. explicitly **not** trained on (only the sibling `financial_phrasebank` sentiment set is `TRUE`) | not a seed | not in the model-card table; not loaded by the eval harness; no financial-news topic source disclosed | as above | absent from all disclosed lists; explicitly excluded by the zeroshot-v2.0 authors |
 | `OpenRL/daily_dialog` @ `1668faf0` (mirror of `li2017dailydialog/daily_dialog`) | `test` flattened to utterances, 7740, 7 | listed as `daily_dialog` with `used_in_v1.0/v1.1 = FALSE`, `future_use = later`; i.e. not in the released model's training set (the emotion sets that **are** `TRUE` are `dair-ai/emotion` and `emo`/EmoContext) | not a seed | not in the model-card table; not loaded by the eval harness. Caveat: Laya's `eval/results.md` shows a trained "emotion and tone" task family (1,825 in-task questions) whose sources are not named, so a dialogue-emotion set cannot be ruled out from the disclosures | as above | absent from all disclosed lists; residual risk through Laya's unnamed emotion family |
@@ -117,13 +126,15 @@ tests, and no composite score.
 ```
 PROTOCOL.md                 frozen protocol (read this first)
 PROTOCOL_ADDENDUM_v2.md     frozen addendum: three follow-up datasets (tweet_topic, fin_topic, daily_dialog)
-REPORT.md                   final report (all numbers, methodology, contamination review, figures)
+REPORT.md                   primary report: dair-ai/emotion (all numbers, methodology, contamination review, figures)
+REPORT_FOLLOWUP.md          follow-up report: the three clean datasets vs the primary result (cross-dataset tables, pairwise tests)
 benchmark.py                end-to-end driver: data -> models -> parquet -> metrics -> plots (--dataset selects the registry entry)
 datasets_registry.py        DatasetSpec registry: source/revision, evaluated split, labels, instruction, hypothesis template, smoke rows
 metrics.py                  PROTOCOL §5 metrics for any class count (accuracy, majority-class accuracy, macro-F1, NLL, Brier, ECE, selective, bootstrap, McNemar)
 plots.py                    PROTOCOL §7 figures (PNG 200 dpi + PDF); scale to 7 and 20 classes
 render_plots.py             re-render every figure from results/summary.json + parquet (no model calls)
 supplementary_analysis.py   post-hoc analyses from the frozen predictions -> results/supplementary.json (no model calls)
+cross_dataset_summary.py    aggregate the primary run + results/<dataset>/ -> results/cross_dataset_summary.{csv,json} and results/plots/cross_dataset_accuracy.{png,pdf}
 inspect_sample.py           deterministic 22-row qualitative sample -> results/inspection_sample.{md,json} (no model calls)
 jev_sequential_latency.py   Jev latency at concurrency 1 on validation rows -> results/jev_sequential_latency.json
 models/common.py            LABELS, INSTRUCTION, DEFINITIONS, revisions, Prediction / LoadInfo / Backend (primary benchmark)
@@ -220,6 +231,7 @@ any dataset, including `emotion`, are written to a `smoke_<split>/` sub-director
 python supplementary_analysis.py                              # -> results/supplementary.json
 python inspect_sample.py                                      # -> results/inspection_sample.{md,json} (from frozen_primary_plain/)
 python render_plots.py                                        # re-render results/plots/ and results/plots/defined/
+python cross_dataset_summary.py                               # -> results/cross_dataset_summary.{csv,json}, results/plots/cross_dataset_accuracy.{png,pdf}
 OPENROUTER_API_KEY=... python jev_sequential_latency.py --n 100   # Jev only; validation rows; -> results/jev_sequential_latency.json
 shasum -a 256 -c results/frozen_primary_plain/SHA256SUMS      # verify the frozen primary snapshot
 ```
@@ -228,7 +240,7 @@ shasum -a 256 -c results/frozen_primary_plain/SHA256SUMS      # verify the froze
 
 | File | Contents |
 |---|---|
-| `raw_predictions.parquet` | one row per `(dataset_index, variant)`: text, gold, and per model `pred, p_<label> x6, confidence, latency_ms, error, retries` plus Jev cost/tokens/response id/model/api confidence/raw probs, Laya api confidence/act probability, PrismNLI independent-entailment probs (PROTOCOL §7) |
+| `raw_predictions.parquet` | one row per `(dataset_index, variant)`: text, gold, and per model `pred, p_<label>` per class (6 for emotion; 6 / 20 / 7 for the follow-up datasets), `confidence, latency_ms, error, retries` plus Jev cost/tokens/response id/model/api confidence/raw probs, Laya api confidence/act probability, PrismNLI independent-entailment probs (PROTOCOL §7) |
 | `summary.json` | per variant: every §5 metric per model (with reliability tables and risk-coverage curves), pairwise exact McNemar and paired bootstrap for every model pair, latency stats, Jev cost and tokens, error and retry counts |
 | `summary.csv` | one headline row per model x variant |
 | `env.json` | package versions, model and dataset revisions, hardware, device/dtype, seeds, per-model `LoadInfo`, peak memory, load time, UTC timestamp |
@@ -242,7 +254,8 @@ shasum -a 256 -c results/frozen_primary_plain/SHA256SUMS      # verify the froze
 | `contamination_research.json` | verbatim, re-fetched quotes from model cards, training notebooks and press for each system's exposure to `dair-ai/emotion` (REPORT.md Section 5) |
 | `run_plain.log` / `run_defined.log` | console logs of the two test-split invocations |
 | `cache/` | Jev response caches (test split: `jev_plain.jsonl`, `jev_defined.jsonl`) and `cache/smoke_validation/`, `cache/seq_latency_validation/` (validation rows only) |
-| `<dataset>/` (`tweet_topic/`, `fin_topic/`, `daily_dialog/`) | the same file set (`raw_predictions.parquet`, `summary.json`, `summary.csv`, `env.json`, `plots/`, `cache/`) for each follow-up dataset of `PROTOCOL_ADDENDUM_v2.md`; `summary.*` additionally carry `n_classes` and `majority_class_accuracy`, and `env.json`/`summary.json` embed the full `DatasetSpec` (source, revision, split, labels, instruction, template) plus Laya's applied temperature bucket |
+| `cross_dataset_summary.csv` / `cross_dataset_summary.json` | output of `cross_dataset_summary.py`: one row per dataset x model (n, classes, majority-class accuracy, accuracy and macro-F1 with CIs, Brier, ECE, NLL, mean confidence, exact-zero gold fraction, accuracy at 50%/80% coverage, p50/p95 latency with `latency_kind`, Jev cost) plus all 12 pairwise tests (exact McNemar, paired bootstrap accuracy difference), `pairwise_paired_bootstrap_extra` (paired bootstrap of macro-F1 / Brier / ECE-15 differences, same 10 000 seed-0 resamples) and `prismnli_independent_entailment` (per dataset: share of rows with two or more labels at independent P(entail) > 0.5, mean max P(entail), top predicted label and its share); the figure is `plots/cross_dataset_accuracy.{png,pdf}` |
+| `<dataset>/` (`tweet_topic/`, `fin_topic/`, `daily_dialog/`) | the same file set (`raw_predictions.parquet`, `summary.json`, `summary.csv`, `env.json`, `plots/`, `cache/`) plus `SHA256SUMS` and `run_plain.log` for each follow-up dataset of `PROTOCOL_ADDENDUM_v2.md`; `summary.*` additionally carry `n_classes` and `majority_class_accuracy`, and `env.json`/`summary.json` embed the full `DatasetSpec` (source, revision, split, labels, instruction, template) plus Laya's applied temperature bucket |
 | `smoke_validation/`, `<dataset>/smoke_<split>/` | outputs of smoke runs (never the evaluated split) |
 
 Rows on which a model failed (after all retries) carry `{model}_error`, `pred = -1` and NaN
@@ -282,33 +295,96 @@ Brackets are 95% percentile bootstrap CIs (10 000 resamples, seed 0). ECE is the
 value on max probability. Jev latency is remote end-to-end under 8 concurrent requests from Perth,
 Australia; local latencies are on-device compute at batch size 1 and are not comparable to it.
 
+### Follow-up on clean datasets (`PROTOCOL_ADDENDUM_v2.md`, `plain` only, full splits)
+
+Three datasets absent from every disclosed training list of the three systems (constraints table
+above), run 2026-09-20 with the same protocol. Full write-up: [`REPORT_FOLLOWUP.md`](REPORT_FOLLOWUP.md);
+data: `results/cross_dataset_summary.{csv,json}`. `maj` = majority-class accuracy; Jev p50 is remote
+end-to-end, local p50 is on-device compute (M1 Max, MPS fp32, bs = 1).
+
+| dataset | n | classes | maj | model | accuracy [CI] | macro-F1 [CI] | Brier | ECE | NLL | p50 latency |
+|---|---|---|---|---|---|---|---|---|---|---|
+| emotion (in PrismNLI lineage) | 2000 | 6 | 0.348 | Jev 1.13 | 0.587 [0.565, 0.608] | 0.500 [0.471, 0.528] | 0.667 | 0.281 | 2.845 | 349 ms (remote e2e) |
+| | | | | PrismNLI-0.4B | **0.725** [0.705, 0.744] | **0.647** [0.620, 0.673] | 0.441 | 0.174 | 1.174 | 58 ms (local) |
+| | | | | Laya | 0.587 [0.565, 0.609] | 0.493 [0.463, 0.522] | 0.707 | 0.307 | 2.032 | 31 ms (local) |
+| tweet_topic | 1693 | 6 | 0.396 | Jev 1.13 | **0.793** [0.774, 0.812] | **0.694** [0.667, 0.718] | 0.294 | 0.063 | 0.703 | 348 ms (remote e2e) |
+| | | | | PrismNLI-0.4B | 0.633 [0.609, 0.655] | 0.544 [0.516, 0.571] | 0.537 | 0.181 | 1.197 | 85 ms (local) |
+| | | | | Laya | 0.632 [0.609, 0.656] | 0.461 [0.434, 0.487] | 0.505 | 0.129 | 1.091 | 35 ms (local) |
+| fin_topic | 4117 | 20 | 0.207 | Jev 1.13 | **0.670** [0.656, 0.684] | **0.630** [0.610, 0.647] | 0.509 | 0.166 | 1.788 | 338 ms (remote e2e) |
+| | | | | PrismNLI-0.4B | 0.352 [0.338, 0.367] | 0.256 [0.240, 0.272] | 0.806 | 0.199 | 2.170 | 195 ms (local) |
+| | | | | Laya | 0.342 [0.327, 0.357] | 0.362 [0.341, 0.381] | 1.249 | 0.610 | 7.841 | 44 ms (local) |
+| daily_dialog | 7740 | 7 | 0.817 | Jev 1.13 | 0.710 [0.700, 0.720] | **0.385** [0.362, 0.406] | 0.460 | 0.156 | 1.451 | 330 ms (remote e2e) |
+| | | | | PrismNLI-0.4B | **0.765** [0.756, 0.775] | 0.345 [0.322, 0.369] | 0.409 | 0.176 | 1.250 | 149 ms (local) |
+| | | | | Laya | 0.614 [0.603, 0.625] | 0.275 [0.256, 0.294] | 0.601 | 0.208 | 1.253 | 53 ms (local) |
+
+- "Clean" means absent from every disclosed training list, not verified unseen.
+- The emotion ranking reverses on the two topic sets: Jev leads PrismNLI by +0.161 [+0.139, +0.182]
+  accuracy on `tweet_topic` (McNemar p = 3.3e-48) and +0.317 [+0.300, +0.335] on `fin_topic`
+  (p = 1.7e-239), with paired macro-F1 differences of +0.149 [+0.121, +0.177] and +0.374
+  [+0.350, +0.396]. On `daily_dialog` the evidence is mixed: PrismNLI is significantly more accurate
+  (0.765 vs 0.710, p = 1.4e-24; `no emotion` is its argmax on 80.7% of rows against an 81.7% base
+  rate) and every system is below the 0.817 majority baseline; Jev's macro-F1 is higher (0.385 vs
+  0.345; marginal CIs overlap slightly, paired difference +0.039 [+0.019, +0.060]).
+- On emotion Jev and Laya are tied and PrismNLI is 14 points ahead; on both topic sets PrismNLI and
+  Laya are tied (p = 1.000 and 0.284) and Jev is 16 to 33 points ahead.
+- Jev has the lowest ECE on all three clean sets (0.063 / 0.166 / 0.156, paired differences to PrismNLI
+  exclude zero) versus 0.281 on emotion; on `daily_dialog` PrismNLI has the lower Brier (0.409 vs 0.460)
+  and NLL (1.250 vs 1.451).
+- On `fin_topic` all three systems collapse onto a single label with this generic template: PrismNLI
+  predicts `Markets` for 38.1% of rows (independent P(entail) > 0.5 for two or more labels on 83.9% of
+  rows, versus 4.7% / 11.6% / 5.0% on `tweet_topic` / `daily_dialog` / emotion; from
+  `prismnli_independent_entailment` in `cross_dataset_summary.json`), Laya predicts `Financials` for
+  24.4% of rows, and Jev sends 146 of 160 `Financials` rows to `Earnings`. Laya's shipped `choice:11+`
+  temperature (0.1006) is consistent with its near-one-hot outputs (ECE 0.610, NLL 7.841, 51.0%
+  exact-zero gold probabilities); it does not affect its argmax, so its accuracy and macro-F1 are
+  temperature-independent.
+- The single dataset on which PrismNLI wins on both accuracy and macro-F1 is the single dataset in its
+  training lineage; the emotion lead is consistent with (not proven by) inherited exposure. Task type
+  is confounded with lineage in this design (PrismNLI also has the higher accuracy on the clean emotion
+  set), so a task-type account is equally consistent. Hedges: three datasets, Twitter/dialogue English
+  only, one frozen prompt each.
+
+![Cross-dataset accuracy, macro-F1 and ECE](results/plots/cross_dataset_accuracy.png)
+
 **Executive summary**
 
-- PrismNLI-0.4B is the best system on every headline quality metric: accuracy 0.725 vs 0.587 for both
-  Jev and Laya. The 0.138 gap is significant (exact McNemar p = 1.5e-41; paired bootstrap 95% CI for
-  Jev minus PrismNLI [-0.158, -0.118]), and it holds on every per-class F1 point estimate and at every
-  selective-classification coverage level (105 vs 261 vs 292 errors at 50% coverage).
-- Jev and Laya are statistically indistinguishable in accuracy (218 vs 219 discordant rows out of
-  2000; McNemar p = 1.000; paired difference CI [-0.022, +0.020]) and macro-F1 (0.500 vs 0.493). Laya
-  therefore reproduces Jev's accuracy with open weights, but the Laya card's claimed +0.115 gap over
-  Jev does not survive a matched protocol.
+- Across the three datasets absent from every disclosed training list the emotion ranking does not
+  hold: Jev is the most accurate and lowest-ECE system on `tweet_topic` (0.793 vs 0.633 / 0.632) and
+  `fin_topic` (0.670 vs 0.352 / 0.342), where PrismNLI and Laya are tied; on `daily_dialog` PrismNLI is
+  more accurate (0.765 vs 0.710) and Jev has the higher macro-F1 (0.385 vs 0.345 / 0.275). Task type
+  (emotion vs topic) is confounded with lineage status. See "Follow-up on clean datasets" above and
+  `REPORT_FOLLOWUP.md`.
+- On emotion only: on `dair-ai/emotion` (the primary run, which stands as measured) PrismNLI-0.4B is
+  the best system on every headline quality metric: accuracy 0.725 vs 0.587 for both Jev and Laya. The
+  0.138 gap is significant (exact McNemar p = 1.5e-41; paired bootstrap 95% CI for Jev minus PrismNLI
+  [-0.158, -0.118]), and it holds on every per-class F1 point estimate and at every
+  selective-classification coverage level (105 vs 261 vs 292 errors at 50% coverage). This dataset is
+  the one whose train and validation splits are in PrismNLI's training lineage.
+- On emotion only: Jev and Laya are statistically indistinguishable in accuracy (218 vs 219 discordant rows out of
+  2000; McNemar p = 1.000; paired difference CI [-0.022, +0.020]) and macro-F1 (0.500 vs 0.493) on
+  emotion, so the Laya card's claimed +0.115 gap over Jev does not survive a matched protocol. The tie
+  itself does not generalise: on the clean sets Laya trails Jev by 16, 33 and 10 accuracy points.
 - Jev's "decision model" architecture gives no measurable advantage over the 0.4B NLI classifier on
-  this benchmark: it is behind on accuracy, F1, Brier (0.667 vs 0.441), ECE (0.281 vs 0.174) and NLL.
-  Its remaining advantages (native choice probabilities, no weights to host, fixed per-call price of
-  $0.0142 per 1000 decisions) are operational and were not scored here.
-- Calibration order on `plain` is PrismNLI, then Jev, then Laya (ECE 0.174 / 0.281 / 0.307). The
+  the emotion benchmark: it is behind on accuracy, F1, Brier (0.667 vs 0.441), ECE (0.281 vs 0.174) and
+  NLL. On `tweet_topic` and `fin_topic` it is ahead on all of these (e.g. `tweet_topic` ECE 0.063 vs
+  0.181, Brier 0.294 vs 0.537); on `daily_dialog` it leads on macro-F1 and ECE but PrismNLI has the
+  higher accuracy (0.765 vs 0.710), lower Brier (0.409 vs 0.460) and lower NLL (1.250 vs 1.451), driven
+  by the 82% `no emotion` class. Its operational properties (native choice probabilities, no weights to host, per-call price
+  of $0.0142 to $0.0203 per 1000 decisions depending on prompt length) were not scored.
+- On emotion only: calibration order on `plain` is PrismNLI, then Jev, then Laya (ECE 0.174 / 0.281 / 0.307). The
   Jev-over-Laya margin is small (paired bootstrap Brier -0.040 [-0.072, -0.009], ECE -0.026
   [-0.047, -0.004]) and reverses under the `defined` variant (Laya ECE 0.230 vs Jev 0.276). Jev's NLL
   is inflated by its 2-decimal API rounding (15.1% of rows put exactly 0 on the gold label). All three
   systems are over-confident in every bin that carries meaningful mass.
-- Both rankings survive the `defined` prompt variant (definitions move Jev +0.013 [+0.003, +0.023],
+- On emotion only: both rankings survive the `defined` prompt variant (definitions move Jev +0.013 [+0.003, +0.023],
   PrismNLI -0.023 [-0.036, -0.010], Laya +0.011 [-0.006, +0.027]; only Laya's shift is within noise). Local per-example compute on an M1 Max (Laya p50 31 ms, PrismNLI 58 ms)
   is 6-11x below Jev's remote round trip (p50 349 ms), but these are different quantities.
 
 **Contamination caveat.** PrismNLI-0.4B was initialised from `deberta-v3-large-zeroshot-v2.0`, whose
 card and harmonisation notebook show verified training exposure to the *train* and *validation*
-splits of `dair-ai/emotion` (up to 500 rows per class, with a declarative emotion-hypothesis template
-similar to ours; the test split is stated as held out). An unknown but non-zero part of PrismNLI's
+splits of `dair-ai/emotion` (the card states up to 500 rows per class, which is not verifiable against
+the public notebook, whose saved output shows a 10,344-row `emotiondair` NLI pool; a declarative
+emotion-hypothesis template similar to ours; the test split is stated as held out). An unknown but non-zero part of PrismNLI's
 14-point lead is therefore dataset familiarity rather than zero-shot capability, and the 2.3-point
 drop under the `defined` template is consistent with (but not proof of) template familiarity. Laya's
 authors claim the dataset was held out and Jev's authors claim all training data is self-made, but
@@ -321,6 +397,10 @@ than calibration comparisons. Details and verbatim sources: REPORT.md Section 5 
 
 - [`REPORT.md`](REPORT.md) - full report (headline tables for both variants, methodology, per-class
   and confusion analysis, calibration, selective classification, contamination review, limitations).
+- [`REPORT_FOLLOWUP.md`](REPORT_FOLLOWUP.md) - follow-up on the three clean datasets (cross-dataset
+  headline and pairwise tables, per-dataset analysis, revisited required-analysis answers);
+  [`results/cross_dataset_summary.csv`](results/cross_dataset_summary.csv) and
+  [`results/plots/cross_dataset_accuracy.png`](results/plots/cross_dataset_accuracy.png).
 - [`results/summary.csv`](results/summary.csv) - one headline row per model x variant
   (`results/summary.json` has every metric, reliability table and pairwise test).
 - [`results/raw_predictions.parquet`](results/raw_predictions.parquet) - per-row predictions,
