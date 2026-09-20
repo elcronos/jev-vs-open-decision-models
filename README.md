@@ -444,7 +444,7 @@ dataset, is the honest comparator for anyone who has labels:
   labelled validation set to check it, which removes part of the "no labels needed" advantage.
 - Labels are prompts. The label string is the model input, and it is fragile: PrismNLI collapses to
   `Markets` because "The topic of this tweet is Markets." is entailed by almost any finance tweet; one
-  line of definitions moved accuracy by 1 to 2 points in opposite directions for different systems
+  line of definitions moved accuracy by 1 to 2.3 points in opposite directions for different systems
   (`defined` variant); Laya's own `BENCHMARKS.md` (order-stability table, English checkpoint) reports prediction flips from option order alone of 4% on DAIR Emotion (n = 200) and 15% on MASSIVE intent. None of
   this exists for a trained classifier, whose classes are indices.
 - Output format artefacts. Jev returns probabilities rounded to 2 decimals, so 15% of emotion rows and
