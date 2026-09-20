@@ -1,0 +1,13 @@
+{
+  "kind": "remote API end-to-end, sequential (concurrency=1), validation rows",
+  "n": 100,
+  "errors": 0,
+  "p50_ms": 362.0599590940401,
+  "p95_ms": 483.05887496098876,
+  "mean_ms": 373.0210474843625,
+  "min_ms": 283.5084160324186,
+  "max_ms": 616.0014589549974,
+  "wall_s": 37.43305191700347,
+  "model": "typesafe/jev-1.13-20260917",
+  "client_location": "Perth, Australia (cf-ray suffix PER observed)"
+}

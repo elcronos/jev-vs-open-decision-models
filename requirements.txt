@@ -1,0 +1,19 @@
+# Exact versions installed in the project venv (Python 3.11.6, Apple M1 Max, torch MPS backend).
+torch==2.14.0
+transformers==4.57.6
+laya==0.3.3
+datasets==5.0.1
+pandas==3.0.6
+pyarrow==25.0.1
+numpy==2.4.6
+scipy==1.17.1
+scikit-learn==1.9.1
+statsmodels==0.15.0
+matplotlib==3.11.2
+seaborn==0.13.2
+httpx==0.28.1
+tqdm==4.70.1
+huggingface_hub==0.36.2
+safetensors==0.8.0
+sentencepiece==0.2.2
+pytest==9.1.1

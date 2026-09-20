@@ -1,0 +1,728 @@
+[
+ {
+  "category": "all_correct",
+  "dataset_index": 1284,
+  "text": "i feel ashamed to type all this",
+  "gold": "sadness",
+  "jev_pred": "sadness",
+  "prismnli_pred": "sadness",
+  "laya_pred": "sadness",
+  "jev_probs": {
+   "sadness": 0.96,
+   "joy": 0.0,
+   "love": 0.0,
+   "anger": 0.0,
+   "fear": 0.04,
+   "surprise": 0.0
+  },
+  "prismnli_probs": {
+   "sadness": 1.0,
+   "joy": 0.0,
+   "love": 0.0,
+   "anger": 0.0,
+   "fear": 0.0,
+   "surprise": 0.0
+  },
+  "laya_probs": {
+   "sadness": 0.949,
+   "joy": 0.002,
+   "love": 0.001,
+   "anger": 0.041,
+   "fear": 0.006,
+   "surprise": 0.001
+  }
+ },
+ {
+  "category": "all_correct",
+  "dataset_index": 1019,
+  "text": "i feel like it was a bit of divine intervention for me",
+  "gold": "joy",
+  "jev_pred": "joy",
+  "prismnli_pred": "joy",
+  "laya_pred": "joy",
+  "jev_probs": {
+   "sadness": 0.0,
+   "joy": 0.7,
+   "love": 0.0,
+   "anger": 0.0,
+   "fear": 0.0,
+   "surprise": 0.3
+  },
+  "prismnli_probs": {
+   "sadness": 0.0,
+   "joy": 0.532,
+   "love": 0.001,
+   "anger": 0.0,
+   "fear": 0.0,
+   "surprise": 0.466
+  },
+  "laya_probs": {
+   "sadness": 0.001,
+   "joy": 0.989,
+   "love": 0.007,
+   "anger": 0.0,
+   "fear": 0.0,
+   "surprise": 0.003
+  }
+ },
+ {
+  "category": "all_correct",
+  "dataset_index": 1724,
+  "text": "i declined to purchase any this time i enjoyed feeling squishing and project thinking all the divine yarn",
+  "gold": "joy",
+  "jev_pred": "joy",
+  "prismnli_pred": "joy",
+  "laya_pred": "joy",
+  "jev_probs": {
+   "sadness": 0.01,
+   "joy": 0.91,
+   "love": 0.08,
+   "anger": 0.0,
+   "fear": 0.0,
+   "surprise": 0.0
+  },
+  "prismnli_probs": {
+   "sadness": 0.0,
+   "joy": 0.867,
+   "love": 0.132,
+   "anger": 0.0,
+   "fear": 0.0,
+   "surprise": 0.0
+  },
+  "laya_probs": {
+   "sadness": 0.0,
+   "joy": 0.999,
+   "love": 0.0,
+   "anger": 0.0,
+   "fear": 0.0,
+   "surprise": 0.0
+  }
+ },
+ {
+  "category": "all_wrong_three_distinct",
+  "dataset_index": 1979,
+  "text": "i have no strong feelings for this book neither hated nor loved it",
+  "gold": "anger",
+  "jev_pred": "sadness",
+  "prismnli_pred": "joy",
+  "laya_pred": "love",
+  "jev_probs": {
+   "sadness": 0.78,
+   "joy": 0.09,
+   "love": 0.04,
+   "anger": 0.03,
+   "fear": 0.01,
+   "surprise": 0.05
+  },
+  "prismnli_probs": {
+   "sadness": 0.107,
+   "joy": 0.289,
+   "love": 0.125,
+   "anger": 0.146,
+   "fear": 0.086,
+   "surprise": 0.247
+  },
+  "laya_probs": {
+   "sadness": 0.012,
+   "joy": 0.03,
+   "love": 0.91,
+   "anger": 0.042,
+   "fear": 0.002,
+   "surprise": 0.004
+  }
+ },
+ {
+  "category": "all_wrong_three_distinct",
+  "dataset_index": 1588,
+  "text": "i don t want to hurt anybody s feelings and i certainly don t want to betray any amount of trust but i do want to entertain and i do want to be faithful to myself my thoughts and the topics at hand",
+  "gold": "love",
+  "jev_pred": "fear",
+  "prismnli_pred": "joy",
+  "laya_pred": "sadness",
+  "jev_probs": {
+   "sadness": 0.06,
+   "joy": 0.14,
+   "love": 0.06,
+   "anger": 0.01,
+   "fear": 0.72,
+   "surprise": 0.01
+  },
+  "prismnli_probs": {
+   "sadness": 0.011,
+   "joy": 0.71,
+   "love": 0.162,
+   "anger": 0.018,
+   "fear": 0.019,
+   "surprise": 0.079
+  },
+  "laya_probs": {
+   "sadness": 0.646,
+   "joy": 0.186,
+   "love": 0.094,
+   "anger": 0.054,
+   "fear": 0.011,
+   "surprise": 0.009
+  }
+ },
+ {
+  "category": "all_wrong_three_distinct",
+  "dataset_index": 62,
+  "text": "i spent wandering around still kinda dazed and not feeling particularly sociable but because id been in hiding for a couple for days and it was getting to be a little unhealthy i made myself go down to the cross and hang out with folks",
+  "gold": "joy",
+  "jev_pred": "sadness",
+  "prismnli_pred": "surprise",
+  "laya_pred": "fear",
+  "jev_probs": {
+   "sadness": 0.95,
+   "joy": 0.0,
+   "love": 0.0,
+   "anger": 0.0,
+   "fear": 0.05,
+   "surprise": 0.0
+  },
+  "prismnli_probs": {
+   "sadness": 0.115,
+   "joy": 0.007,
+   "love": 0.008,
+   "anger": 0.004,
+   "fear": 0.096,
+   "surprise": 0.77
+  },
+  "laya_probs": {
+   "sadness": 0.23,
+   "joy": 0.001,
+   "love": 0.001,
+   "anger": 0.002,
+   "fear": 0.765,
+   "surprise": 0.001
+  }
+ },
+ {
+  "category": "only_jev_correct",
+  "dataset_index": 985,
+  "text": "i feel about this part of my life and how treasured my london flatmates are to me it was especially neat to point at something and say this is where",
+  "gold": "love",
+  "jev_pred": "love",
+  "prismnli_pred": "joy",
+  "laya_pred": "joy",
+  "jev_probs": {
+   "sadness": 0.0,
+   "joy": 0.29,
+   "love": 0.71,
+   "anger": 0.0,
+   "fear": 0.0,
+   "surprise": 0.0
+  },
+  "prismnli_probs": {
+   "sadness": 0.001,
+   "joy": 0.887,
+   "love": 0.039,
+   "anger": 0.001,
+   "fear": 0.001,
+   "surprise": 0.072
+  },
+  "laya_probs": {
+   "sadness": 0.001,
+   "joy": 0.992,
+   "love": 0.003,
+   "anger": 0.001,
+   "fear": 0.001,
+   "surprise": 0.003
+  }
+ },
+ {
+  "category": "only_jev_correct",
+  "dataset_index": 711,
+  "text": "told by some people the class leader only choose his friends not true",
+  "gold": "anger",
+  "jev_pred": "anger",
+  "prismnli_pred": "surprise",
+  "laya_pred": "love",
+  "jev_probs": {
+   "sadness": 0.05,
+   "joy": 0.01,
+   "love": 0.0,
+   "anger": 0.77,
+   "fear": 0.0,
+   "surprise": 0.17
+  },
+  "prismnli_probs": {
+   "sadness": 0.053,
+   "joy": 0.03,
+   "love": 0.02,
+   "anger": 0.186,
+   "fear": 0.151,
+   "surprise": 0.56
+  },
+  "laya_probs": {
+   "sadness": 0.008,
+   "joy": 0.091,
+   "love": 0.893,
+   "anger": 0.003,
+   "fear": 0.002,
+   "surprise": 0.003
+  }
+ },
+ {
+  "category": "only_jev_correct",
+  "dataset_index": 1627,
+  "text": "i feel i can only hope im not alone in these thoughts and im sure to all you fellow exchange students you probably have the same thoughts in mind with at least some of this listed some might say being an exchange student is unlike any other experience",
+  "gold": "sadness",
+  "jev_pred": "sadness",
+  "prismnli_pred": "joy",
+  "laya_pred": "joy",
+  "jev_probs": {
+   "sadness": 0.64,
+   "joy": 0.02,
+   "love": 0.01,
+   "anger": 0.0,
+   "fear": 0.33,
+   "surprise": 0.0
+  },
+  "prismnli_probs": {
+   "sadness": 0.015,
+   "joy": 0.729,
+   "love": 0.036,
+   "anger": 0.013,
+   "fear": 0.042,
+   "surprise": 0.166
+  },
+  "laya_probs": {
+   "sadness": 0.025,
+   "joy": 0.8,
+   "love": 0.088,
+   "anger": 0.006,
+   "fear": 0.023,
+   "surprise": 0.059
+  }
+ },
+ {
+  "category": "only_prismnli_correct",
+  "dataset_index": 1376,
+  "text": "i feel completely rude with not keeping up with some of you over the course of the year but it has been a mightily busy one",
+  "gold": "anger",
+  "jev_pred": "sadness",
+  "prismnli_pred": "anger",
+  "laya_pred": "sadness",
+  "jev_probs": {
+   "sadness": 0.94,
+   "joy": 0.01,
+   "love": 0.01,
+   "anger": 0.01,
+   "fear": 0.02,
+   "surprise": 0.01
+  },
+  "prismnli_probs": {
+   "sadness": 0.0,
+   "joy": 0.0,
+   "love": 0.0,
+   "anger": 1.0,
+   "fear": 0.0,
+   "surprise": 0.0
+  },
+  "laya_probs": {
+   "sadness": 0.713,
+   "joy": 0.099,
+   "love": 0.004,
+   "anger": 0.176,
+   "fear": 0.003,
+   "surprise": 0.005
+  }
+ },
+ {
+  "category": "only_prismnli_correct",
+  "dataset_index": 1049,
+  "text": "i both feel impatience at the rate of loss and impressed at the same time",
+  "gold": "surprise",
+  "jev_pred": "sadness",
+  "prismnli_pred": "surprise",
+  "laya_pred": "sadness",
+  "jev_probs": {
+   "sadness": 0.33,
+   "joy": 0.02,
+   "love": 0.01,
+   "anger": 0.3,
+   "fear": 0.01,
+   "surprise": 0.33
+  },
+  "prismnli_probs": {
+   "sadness": 0.071,
+   "joy": 0.038,
+   "love": 0.019,
+   "anger": 0.209,
+   "fear": 0.018,
+   "surprise": 0.645
+  },
+  "laya_probs": {
+   "sadness": 0.998,
+   "joy": 0.0,
+   "love": 0.0,
+   "anger": 0.001,
+   "fear": 0.0,
+   "surprise": 0.0
+  }
+ },
+ {
+  "category": "only_prismnli_correct",
+  "dataset_index": 1179,
+  "text": "i didn t and still don t feel lucky though",
+  "gold": "joy",
+  "jev_pred": "sadness",
+  "prismnli_pred": "joy",
+  "laya_pred": "sadness",
+  "jev_probs": {
+   "sadness": 1.0,
+   "joy": 0.0,
+   "love": 0.0,
+   "anger": 0.0,
+   "fear": 0.0,
+   "surprise": 0.0
+  },
+  "prismnli_probs": {
+   "sadness": 0.024,
+   "joy": 0.969,
+   "love": 0.001,
+   "anger": 0.002,
+   "fear": 0.001,
+   "surprise": 0.003
+  },
+  "laya_probs": {
+   "sadness": 0.952,
+   "joy": 0.031,
+   "love": 0.008,
+   "anger": 0.006,
+   "fear": 0.002,
+   "surprise": 0.001
+  }
+ },
+ {
+  "category": "only_laya_correct",
+  "dataset_index": 1746,
+  "text": "i feel that it is of vital importance that those who care about me know this stuff",
+  "gold": "joy",
+  "jev_pred": "fear",
+  "prismnli_pred": "love",
+  "laya_pred": "joy",
+  "jev_probs": {
+   "sadness": 0.01,
+   "joy": 0.0,
+   "love": 0.47,
+   "anger": 0.01,
+   "fear": 0.51,
+   "surprise": 0.0
+  },
+  "prismnli_probs": {
+   "sadness": 0.009,
+   "joy": 0.42,
+   "love": 0.544,
+   "anger": 0.01,
+   "fear": 0.01,
+   "surprise": 0.008
+  },
+  "laya_probs": {
+   "sadness": 0.229,
+   "joy": 0.368,
+   "love": 0.367,
+   "anger": 0.009,
+   "fear": 0.019,
+   "surprise": 0.009
+  }
+ },
+ {
+  "category": "only_laya_correct",
+  "dataset_index": 1404,
+  "text": "i can tell my arms and hands feel weaker and they feel more numb and tingly at night when i wake up",
+  "gold": "sadness",
+  "jev_pred": "fear",
+  "prismnli_pred": "surprise",
+  "laya_pred": "sadness",
+  "jev_probs": {
+   "sadness": 0.1,
+   "joy": 0.0,
+   "love": 0.0,
+   "anger": 0.0,
+   "fear": 0.9,
+   "surprise": 0.0
+  },
+  "prismnli_probs": {
+   "sadness": 0.209,
+   "joy": 0.044,
+   "love": 0.044,
+   "anger": 0.045,
+   "fear": 0.212,
+   "surprise": 0.446
+  },
+  "laya_probs": {
+   "sadness": 0.926,
+   "joy": 0.005,
+   "love": 0.006,
+   "anger": 0.002,
+   "fear": 0.059,
+   "surprise": 0.002
+  }
+ },
+ {
+  "category": "only_laya_correct",
+  "dataset_index": 604,
+  "text": "i feel like i fucked up big time but i have to protect a and myself",
+  "gold": "anger",
+  "jev_pred": "fear",
+  "prismnli_pred": "sadness",
+  "laya_pred": "anger",
+  "jev_probs": {
+   "sadness": 0.01,
+   "joy": 0.0,
+   "love": 0.0,
+   "anger": 0.0,
+   "fear": 0.99,
+   "surprise": 0.0
+  },
+  "prismnli_probs": {
+   "sadness": 0.974,
+   "joy": 0.001,
+   "love": 0.001,
+   "anger": 0.003,
+   "fear": 0.02,
+   "surprise": 0.001
+  },
+  "laya_probs": {
+   "sadness": 0.03,
+   "joy": 0.0,
+   "love": 0.0,
+   "anger": 0.956,
+   "fear": 0.013,
+   "surprise": 0.0
+  }
+ },
+ {
+  "category": "jev_highconf_wrong",
+  "dataset_index": 1183,
+  "text": "i feel like i should have some sort of rockstar razzle dazzle lifestyle but i would at least like to spend a third of my life doing something i feel is worthwhile",
+  "gold": "joy",
+  "jev_pred": "sadness",
+  "prismnli_pred": "joy",
+  "laya_pred": "love",
+  "jev_probs": {
+   "sadness": 0.99,
+   "joy": 0.0,
+   "love": 0.0,
+   "anger": 0.0,
+   "fear": 0.01,
+   "surprise": 0.0
+  },
+  "prismnli_probs": {
+   "sadness": 0.002,
+   "joy": 0.986,
+   "love": 0.004,
+   "anger": 0.002,
+   "fear": 0.003,
+   "surprise": 0.003
+  },
+  "laya_probs": {
+   "sadness": 0.156,
+   "joy": 0.115,
+   "love": 0.71,
+   "anger": 0.007,
+   "fear": 0.007,
+   "surprise": 0.005
+  }
+ },
+ {
+  "category": "jev_highconf_wrong",
+  "dataset_index": 1725,
+  "text": "i feel like it add a little bit more shield from the cold and the fabric is great for wicking away sweat",
+  "gold": "anger",
+  "jev_pred": "joy",
+  "prismnli_pred": "joy",
+  "laya_pred": "joy",
+  "jev_probs": {
+   "sadness": 0.0,
+   "joy": 0.98,
+   "love": 0.02,
+   "anger": 0.0,
+   "fear": 0.0,
+   "surprise": 0.0
+  },
+  "prismnli_probs": {
+   "sadness": 0.025,
+   "joy": 0.873,
+   "love": 0.029,
+   "anger": 0.025,
+   "fear": 0.024,
+   "surprise": 0.024
+  },
+  "laya_probs": {
+   "sadness": 0.026,
+   "joy": 0.784,
+   "love": 0.08,
+   "anger": 0.031,
+   "fear": 0.041,
+   "surprise": 0.037
+  }
+ },
+ {
+  "category": "prismnli_highconf_wrong",
+  "dataset_index": 1537,
+  "text": "i like the fresh feeling of sweet he gave me",
+  "gold": "joy",
+  "jev_pred": "joy",
+  "prismnli_pred": "love",
+  "laya_pred": "love",
+  "jev_probs": {
+   "sadness": 0.0,
+   "joy": 0.7,
+   "love": 0.3,
+   "anger": 0.0,
+   "fear": 0.0,
+   "surprise": 0.0
+  },
+  "prismnli_probs": {
+   "sadness": 0.0,
+   "joy": 0.017,
+   "love": 0.982,
+   "anger": 0.0,
+   "fear": 0.0,
+   "surprise": 0.001
+  },
+  "laya_probs": {
+   "sadness": 0.0,
+   "joy": 0.244,
+   "love": 0.755,
+   "anger": 0.0,
+   "fear": 0.0,
+   "surprise": 0.0
+  }
+ },
+ {
+  "category": "prismnli_highconf_wrong",
+  "dataset_index": 1475,
+  "text": "i did feel things it was often just repressed fear and anxiety and distrust",
+  "gold": "sadness",
+  "jev_pred": "fear",
+  "prismnli_pred": "fear",
+  "laya_pred": "fear",
+  "jev_probs": {
+   "sadness": 0.0,
+   "joy": 0.0,
+   "love": 0.0,
+   "anger": 0.0,
+   "fear": 1.0,
+   "surprise": 0.0
+  },
+  "prismnli_probs": {
+   "sadness": 0.0,
+   "joy": 0.0,
+   "love": 0.0,
+   "anger": 0.0,
+   "fear": 0.999,
+   "surprise": 0.0
+  },
+  "laya_probs": {
+   "sadness": 0.002,
+   "joy": 0.0,
+   "love": 0.0,
+   "anger": 0.001,
+   "fear": 0.997,
+   "surprise": 0.0
+  }
+ },
+ {
+  "category": "laya_highconf_wrong",
+  "dataset_index": 341,
+  "text": "ive been feeling from my adoring fans that would be teh whole like of you who are my friends here i felt brave and excited and ventrured forth with guitar in hand to a local open mic night",
+  "gold": "love",
+  "jev_pred": "joy",
+  "prismnli_pred": "joy",
+  "laya_pred": "joy",
+  "jev_probs": {
+   "sadness": 0.0,
+   "joy": 0.98,
+   "love": 0.02,
+   "anger": 0.0,
+   "fear": 0.0,
+   "surprise": 0.0
+  },
+  "prismnli_probs": {
+   "sadness": 0.0,
+   "joy": 0.952,
+   "love": 0.046,
+   "anger": 0.0,
+   "fear": 0.001,
+   "surprise": 0.0
+  },
+  "laya_probs": {
+   "sadness": 0.0,
+   "joy": 0.997,
+   "love": 0.001,
+   "anger": 0.001,
+   "fear": 0.001,
+   "surprise": 0.0
+  }
+ },
+ {
+  "category": "laya_highconf_wrong",
+  "dataset_index": 215,
+  "text": "i feel dirty talking to people for my personal gain",
+  "gold": "sadness",
+  "jev_pred": "sadness",
+  "prismnli_pred": "anger",
+  "laya_pred": "anger",
+  "jev_probs": {
+   "sadness": 0.88,
+   "joy": 0.0,
+   "love": 0.0,
+   "anger": 0.03,
+   "fear": 0.09,
+   "surprise": 0.0
+  },
+  "prismnli_probs": {
+   "sadness": 0.055,
+   "joy": 0.002,
+   "love": 0.002,
+   "anger": 0.936,
+   "fear": 0.002,
+   "surprise": 0.002
+  },
+  "laya_probs": {
+   "sadness": 0.011,
+   "joy": 0.001,
+   "love": 0.001,
+   "anger": 0.984,
+   "fear": 0.004,
+   "surprise": 0.001
+  }
+ },
+ {
+  "category": "class_fill_fear",
+  "dataset_index": 28,
+  "text": "i do feel insecure sometimes but who doesnt",
+  "gold": "fear",
+  "jev_pred": "fear",
+  "prismnli_pred": "fear",
+  "laya_pred": "sadness",
+  "jev_probs": {
+   "sadness": 0.1,
+   "joy": 0.0,
+   "love": 0.0,
+   "anger": 0.0,
+   "fear": 0.9,
+   "surprise": 0.0
+  },
+  "prismnli_probs": {
+   "sadness": 0.0,
+   "joy": 0.0,
+   "love": 0.0,
+   "anger": 0.0,
+   "fear": 1.0,
+   "surprise": 0.0
+  },
+  "laya_probs": {
+   "sadness": 0.857,
+   "joy": 0.002,
+   "love": 0.0,
+   "anger": 0.0,
+   "fear": 0.141,
+   "surprise": 0.0
+  }
+ }
+]
