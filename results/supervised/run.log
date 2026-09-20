@@ -1,0 +1,24 @@
+=== emotion
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Loading weights:   0%|          | 0/103 [00:00<?, ?it/s]Loading weights: 100%|██████████| 103/103 [00:00<00:00, 19045.69it/s]
+  logreg_tfidf   acc=0.860 f1=0.785 ece=0.031 T=0.51 train=2s iters=None
+  lgbm_tfidf     acc=0.870 f1=0.806 ece=0.033 T=0.93 train=28s iters=190
+  logreg_minilm  acc=0.685 f1=0.597 ece=0.019 T=0.98 train=1s iters=None
+  lgbm_minilm    acc=0.689 f1=0.551 ece=0.029 T=1.24 train=19s iters=114
+=== tweet_topic
+  logreg_tfidf   acc=0.776 f1=0.555 ece=0.050 T=0.84 train=1s iters=None
+  lgbm_tfidf     acc=0.709 f1=0.421 ece=0.061 T=1.07 train=9s iters=59
+  logreg_minilm  acc=0.848 f1=0.718 ece=0.028 T=1.11 train=0s iters=None
+  lgbm_minilm    acc=0.817 f1=0.602 ece=0.028 T=1.15 train=6s iters=53
+=== fin_topic
+  logreg_tfidf   acc=0.828 f1=0.785 ece=0.018 T=0.68 train=10s iters=None
+  lgbm_tfidf     acc=0.811 f1=0.792 ece=0.015 T=1.07 train=54s iters=125
+  logreg_minilm  acc=0.792 f1=0.784 ece=0.014 T=0.87 train=1s iters=None
+  lgbm_minilm    acc=0.784 f1=0.742 ece=0.012 T=1.27 train=42s iters=117
+=== daily_dialog
+  logreg_tfidf   acc=0.852 f1=0.376 ece=0.038 T=0.97 train=10s iters=None
+  lgbm_tfidf     acc=0.846 f1=0.385 ece=0.032 T=0.95 train=48s iters=124
+  logreg_minilm  acc=0.848 f1=0.332 ece=0.033 T=0.90 train=2s iters=None
+  lgbm_minilm    acc=0.848 f1=0.432 ece=0.031 T=1.00 train=29s iters=64
+wrote results/supervised_models.json
+EXIT 0

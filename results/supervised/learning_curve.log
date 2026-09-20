@@ -1,0 +1,70 @@
+=== emotion
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Loading weights:   0%|          | 0/103 [00:00<?, ?it/s]Loading weights: 100%|██████████| 103/103 [00:00<00:00, 17454.38it/s]
+  n=    50 minilm acc=0.412 [0.387,0.436] f1=0.202
+  n=    50 tfidf  acc=0.351 [0.344,0.366] f1=0.129
+  n=   100 minilm acc=0.509 [0.488,0.542] f1=0.288
+  n=   100 tfidf  acc=0.356 [0.351,0.360] f1=0.151
+  n=   200 minilm acc=0.551 [0.548,0.556] f1=0.366
+  n=   200 tfidf  acc=0.396 [0.381,0.404] f1=0.169
+  n=   500 minilm acc=0.598 [0.593,0.602] f1=0.430
+  n=   500 tfidf  acc=0.456 [0.449,0.462] f1=0.215
+  n=  1000 minilm acc=0.608 [0.599,0.617] f1=0.472
+  n=  1000 tfidf  acc=0.527 [0.521,0.530] f1=0.298
+  n=  2000 minilm acc=0.639 [0.634,0.645] f1=0.524
+  n=  2000 tfidf  acc=0.612 [0.610,0.615] f1=0.425
+  n=  5000 minilm acc=0.666 [0.663,0.667] f1=0.566
+  n=  5000 tfidf  acc=0.751 [0.742,0.763] f1=0.626
+  n= 16000 minilm acc=0.685 [0.685,0.685] f1=0.597
+  n= 16000 tfidf  acc=0.860 [0.860,0.860] f1=0.787
+=== tweet_topic
+  n=    50 minilm acc=0.723 [0.701,0.735] f1=0.324
+  n=    50 tfidf  acc=0.508 [0.451,0.544] f1=0.203
+  n=   100 minilm acc=0.755 [0.741,0.774] f1=0.404
+  n=   100 tfidf  acc=0.576 [0.539,0.610] f1=0.221
+  n=   200 minilm acc=0.779 [0.772,0.784] f1=0.471
+  n=   200 tfidf  acc=0.613 [0.601,0.631] f1=0.249
+  n=   500 minilm acc=0.810 [0.802,0.820] f1=0.576
+  n=   500 tfidf  acc=0.652 [0.651,0.653] f1=0.290
+  n=  1000 minilm acc=0.821 [0.813,0.828] f1=0.609
+  n=  1000 tfidf  acc=0.691 [0.685,0.696] f1=0.338
+  n=  2000 minilm acc=0.836 [0.833,0.838] f1=0.681
+  n=  2000 tfidf  acc=0.717 [0.706,0.734] f1=0.397
+  n=  4374 minilm acc=0.848 [0.848,0.848] f1=0.718
+  n=  4374 tfidf  acc=0.768 [0.768,0.768] f1=0.526
+=== fin_topic
+  n=    50 minilm acc=0.340 [0.295,0.377] f1=0.145
+  n=    50 tfidf  acc=0.244 [0.192,0.323] f1=0.080
+  n=   100 minilm acc=0.408 [0.338,0.451] f1=0.233
+  n=   100 tfidf  acc=0.314 [0.256,0.352] f1=0.138
+  n=   200 minilm acc=0.487 [0.457,0.540] f1=0.295
+  n=   200 tfidf  acc=0.338 [0.297,0.381] f1=0.158
+  n=   500 minilm acc=0.622 [0.603,0.636] f1=0.474
+  n=   500 tfidf  acc=0.484 [0.472,0.501] f1=0.318
+  n=  1000 minilm acc=0.675 [0.669,0.681] f1=0.556
+  n=  1000 tfidf  acc=0.566 [0.556,0.573] f1=0.408
+  n=  2000 minilm acc=0.708 [0.702,0.712] f1=0.622
+  n=  2000 tfidf  acc=0.638 [0.634,0.645] f1=0.498
+  n=  5000 minilm acc=0.755 [0.750,0.758] f1=0.705
+  n=  5000 tfidf  acc=0.734 [0.733,0.737] f1=0.639
+  n= 15291 minilm acc=0.792 [0.792,0.792] f1=0.784
+  n= 15291 tfidf  acc=0.829 [0.829,0.829] f1=0.786
+=== daily_dialog
+  n=    50 minilm acc=0.818 [0.815,0.823] f1=0.143
+  n=    50 tfidf  acc=0.817 [0.816,0.818] f1=0.133
+  n=   100 minilm acc=0.819 [0.816,0.826] f1=0.143
+  n=   100 tfidf  acc=0.818 [0.817,0.819] f1=0.137
+  n=   200 minilm acc=0.822 [0.818,0.828] f1=0.157
+  n=   200 tfidf  acc=0.819 [0.818,0.820] f1=0.142
+  n=   500 minilm acc=0.827 [0.825,0.831] f1=0.180
+  n=   500 tfidf  acc=0.819 [0.815,0.824] f1=0.149
+  n=  1000 minilm acc=0.830 [0.828,0.832] f1=0.191
+  n=  1000 tfidf  acc=0.823 [0.822,0.825] f1=0.160
+  n=  2000 minilm acc=0.833 [0.831,0.836] f1=0.223
+  n=  2000 tfidf  acc=0.827 [0.827,0.828] f1=0.180
+  n=  5000 minilm acc=0.840 [0.840,0.840] f1=0.270
+  n=  5000 tfidf  acc=0.832 [0.830,0.834] f1=0.203
+  n= 87170 minilm acc=0.848 [0.848,0.848] f1=0.332
+  n= 87170 tfidf  acc=0.849 [0.849,0.849] f1=0.370
+wrote results/plots/learning_curve.png; crossovers: {'emotion': {'minilm': None, 'tfidf': 5000}, 'tweet_topic': {'minilm': 500, 'tfidf': None}, 'fin_topic': {'minilm': 1000, 'tfidf': 5000}, 'daily_dialog': {'minilm': 50, 'tfidf': 50}}
+EXIT 0
