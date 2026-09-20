@@ -66,6 +66,25 @@ and documented; the report treats PrismNLI's lead as partly non-zero-shot for th
 follow-up on an emotion dataset absent from the `zeroshot-v2.0` list (the list covers 28 public
 classification sets, so candidates are scarce) is the clean next step.
 
+### Why not an existing Jev benchmark (JevBench, jev-benchmarks, decision-model-benchmark)?
+
+Several community benchmarks for Jev-class models appeared in the days around Jev 1.13's release.
+They were reviewed and are useful context, but none fits the question asked here, which is about
+*zero-shot decision quality on an independent, externally labelled dataset* where a proprietary
+decision model, an open NLI classifier and an open typed-decision model can all be run natively.
+
+| Existing suite | What it is | Why it was not used as the primary benchmark |
+|---|---|---|
+| [JevBench](https://github.com/fstandhartinger/jevbench) (v1.0 to v1.2.2, 19 Sep 2026) | 534 typed "decisions" across routing, answer-adequacy judging, policy checks, intent, ordinal scoring, enum extraction; composite score = Intelligence, Calibration, Speed, Cost (geometric mean). | (1) **Not independent data**: the hard-tier items were "written by Claude Opus 5 and GPT-5.6 Sol", the rest are hand-written or imported from the author's own router logs; gold labels come from the author or a deterministic grader, not from an external annotation process. (2) **Not fully public**: 109 hard-tier and 24 held-out items are private and 146 imported items are not redistributed, so a third party cannot reproduce the headline number. (3) **Built around Jev's primitives**: tasks are defined as `noul` / `choice` / `score` rubrics in TypeSafe's wire format, so the task distribution is shaped by the API being evaluated; there is no NLI adapter, and mapping `score`/`noul`/extraction items onto entailment hypotheses would require inventing a per-family conversion for PrismNLI, breaking apples-to-apples. (4) **Small and heterogeneous**: 72 public original items; per-family n is too small for the paired tests used here. (5) Its composite folds in a latency adjustment ("x2 + 0.15 s ... an assumption, not a measurement") and a cost scale; this report deliberately keeps local compute latency and remote end-to-end latency apart and reports raw quantities. (6) It was released and re-scored four times on the day before this run; it is a moving target. |
+| [AbdelStark/jev-benchmarks](https://github.com/AbdelStark/jev-benchmarks) (BTZSC pilot v1, 17 Sep 2026) | Jev vs GLiNER2.5 on 100 class-balanced rows each of AG News, DAIR Emotion and Banking77, via the `btzsc/btzsc` re-packaged dataset. | Closest in spirit, and its DAIR Emotion Jev number (0.480) is the one the Laya authors cite. Not reused because: 100 rows per dataset gives a +/- 10-point CI; it repackages the data (entailment-pair format, class-balanced subsample) instead of the official 2,000-row test split; its comparator is GLiNER, not an NLI model or Laya; and its prompt (`Which single label best describes the input text?` with `label_000`-style keys and BTZSC label descriptions) differs from a bare six-way `choice`. Our Section 6(c) compares against it as context only. |
+| [nibzard/decision-model-benchmark](https://github.com/nibzard/decision-model-benchmark) (18 Sep 2026) | Five suites: 77-way intent, binary spam gate, synthetic cardinality sweep, option-order stability, forced-uncertainty honesty. | Three of five suites are seeded synthetic; the 77-way suite exceeds Laya's option budget; no emotion or six-way classification suite; designed to probe API behaviours (order stability, honesty) rather than accuracy on an external dataset. |
+
+The three suites above are complementary probes of Jev-class behaviour (order stability,
+forced uncertainty, schema validity, cost composites). This repository asks a narrower question
+with a stricter design: one public, versioned, externally labelled dataset, the full official test
+split, one frozen prompt per variant, native probabilities from every system, paired significance
+tests, and no composite score.
+
 ## Layout
 
 ```
