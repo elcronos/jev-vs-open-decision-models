@@ -5,3 +5,7 @@ __pycache__/
 *.bak*
 .env
 .DS_Store
+
+results/*/smoke_*/
+results/smoke_validation/
+results/*/cache/smoke_*/

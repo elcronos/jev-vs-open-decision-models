@@ -4,9 +4,12 @@ Implements PROTOCOL.md §3.1 exactly:
 
 * ``POST https://openrouter.ai/api/alpha/decisions`` with ``Authorization: Bearer $OPENROUTER_API_KEY``.
 * Pinned model id ``common.JEV_MODEL_ID``; the ``model`` string echoed by the API is recorded.
-* ``state`` is the raw text; one ``choice`` question named ``emotion`` with the frozen instruction and
-  a criteria dict whose values are ``""`` (variant ``plain``) or ``common.DEFINITIONS`` (variant
-  ``defined``).
+* ``state`` is the raw text; one ``choice`` question (id ``spec.question_id``, ``"emotion"`` for the
+  primary benchmark) with the dataset's frozen instruction and a criteria dict whose keys are
+  ``spec.labels`` verbatim and whose values are ``""`` (variant ``plain``) or the spec's definitions
+  (variant ``defined``; only datasets with definitions support it).
+* The dataset is a ``datasets_registry.DatasetSpec`` passed at construction; it defaults to the
+  emotion spec, so every pre-existing call produces the exact request body of PROTOCOL.md §3.1.
 * Concurrency 8, timeout 60 s, up to 6 attempts, exponential backoff 1,2,4,8,16,32 s with jitter,
   retry on 429 / 5xx / timeouts / connection errors; ``Retry-After`` honoured on 429.
 * Probabilities are stored exactly as returned (``extra["raw_probs"]``) and renormalised into
@@ -35,11 +38,9 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 
+from datasets_registry import EMOTION, DatasetSpec
 from models.common import (
-    DEFINITIONS,
-    INSTRUCTION,
     JEV_MODEL_ID,
-    LABEL2ID,
     LABELS,
     VARIANTS,
     LoadInfo,
@@ -97,21 +98,20 @@ def _parse_retry_after(value: Optional[str]) -> Optional[float]:
     return max(0.0, dt.timestamp() - time.time())
 
 
-def build_request_body(text: str, variant: str = "plain") -> Dict[str, Any]:
-    """Return the exact request body of PROTOCOL.md §3.1 for ``text`` and ``variant``."""
-    if variant not in VARIANTS:
-        raise ValueError(f"unknown variant {variant!r}; expected one of {VARIANTS}")
-    if variant == "plain":
-        criteria = {label: "" for label in LABELS}
-    else:
-        criteria = {label: DEFINITIONS[label] for label in LABELS}
+def build_request_body(text: str, variant: str = "plain", spec: DatasetSpec = EMOTION) -> Dict[str, Any]:
+    """Return the exact request body of PROTOCOL.md §3.1 for ``text``, ``variant`` and dataset ``spec``.
+
+    Criteria keys are ``spec.labels`` verbatim, values ``""`` (plain) or the spec's definitions
+    (defined). Raises ``ValueError`` for ``defined`` on a dataset without definitions.
+    """
+    criteria = spec.criteria(variant, empty="")
     return {
         "model": JEV_MODEL_ID,
         "state": text,
         "questions": {
-            "emotion": {
+            spec.question_id: {
                 "type": "choice",
-                "instructions": INSTRUCTION,
+                "instructions": spec.instruction,
                 "criteria": criteria,
             }
         },
@@ -131,6 +131,9 @@ class JevBackend:
         If False, the cache is neither read nor written (useful for one-off checks).
     concurrency, timeout_s, max_attempts:
         Protocol values; exposed for tests only, do not change for real runs.
+    spec:
+        The ``DatasetSpec`` (labels, instruction, question id, definitions). Defaults to the
+        emotion spec of the primary benchmark.
     """
 
     name: str = "jev"
@@ -139,6 +142,7 @@ class JevBackend:
         self,
         cache_dir: Optional[Path] = None,
         *,
+        spec: DatasetSpec = EMOTION,
         use_cache: bool = True,
         concurrency: int = CONCURRENCY,
         timeout_s: float = TIMEOUT_S,
@@ -146,6 +150,7 @@ class JevBackend:
         endpoint: str = DECISIONS_URL,
         show_progress: bool = False,
     ) -> None:
+        self.spec = spec
         self.cache_dir = Path(cache_dir) if cache_dir is not None else DEFAULT_CACHE_DIR
         self.use_cache = use_cache
         self.concurrency = concurrency
@@ -199,6 +204,9 @@ class JevBackend:
                 "timeout_s": self.timeout_s,
                 "max_attempts": self.max_attempts,
                 "backoff_s": list(BACKOFF_S[: max(0, self.max_attempts - 1)]),
+                "dataset": self.spec.key,
+                "question_id": self.spec.question_id,
+                "n_options": self.spec.n_classes,
             },
         )
 
@@ -375,7 +383,7 @@ class JevBackend:
         failed, retryable attempt, so the returned ``Prediction`` always has either finite ``probs``
         and ``error is None`` or ``pred == -1`` and a non-empty ``error`` (never cached).
         """
-        body = build_request_body(text, variant)
+        body = build_request_body(text, variant, self.spec)
         history: List[Any] = []
         last_error = "no attempt made"
         for attempt in range(1, self.max_attempts + 1):
@@ -397,7 +405,7 @@ class JevBackend:
                 time.sleep(sleep_s)
         return Prediction(
             dataset_index=int(dataset_index),
-            probs=[float("nan")] * len(LABELS),
+            probs=[float("nan")] * self.spec.n_classes,
             pred=-1,
             confidence=float("nan"),
             latency_ms=float("nan"),
@@ -424,13 +432,17 @@ class JevBackend:
         """Map a successful response body to a ``Prediction`` (§3.1 recording rules).
 
         Raises ``JevAPIError`` (retryable, ``status_tag="200_malformed"``) when the body has no
-        ``answers.emotion``, no ``probabilities`` dict, or a probability vector that sums to 0 with an
-        unrecognised ``choice`` -- such a body must never become a cached ``error=None`` prediction.
+        ``answers.<question_id>``, no ``probabilities`` dict, or a probability vector that sums to 0
+        with an unrecognised ``choice`` -- such a body must never become a cached ``error=None``
+        prediction.
         """
+        labels = self.spec.labels
+        label2id = self.spec.label2id
+        qid = self.spec.question_id
         answers = data.get("answers")
-        answer = answers.get("emotion") if isinstance(answers, dict) else None
+        answer = answers.get(qid) if isinstance(answers, dict) else None
         if not isinstance(answer, dict) or not answer:
-            raise JevAPIError("malformed response: missing answers.emotion", retryable=True,
+            raise JevAPIError(f"malformed response: missing answers.{qid}", retryable=True,
                               status_tag="200_malformed")
         raw_probs = answer.get("probabilities")
         if not isinstance(raw_probs, dict):
@@ -442,14 +454,14 @@ class JevBackend:
             raise JevAPIError(f"malformed response: non-numeric probability ({exc})",
                               retryable=True, status_tag="200_malformed") from exc
         api_choice = answer.get("choice")
-        choice_id = LABEL2ID.get(api_choice, -1) if isinstance(api_choice, str) else -1
+        choice_id = label2id.get(api_choice, -1) if isinstance(api_choice, str) else -1
 
-        ordered = [raw_probs.get(label, 0.0) for label in LABELS]
+        ordered = [raw_probs.get(label, 0.0) for label in labels]
         probs = renormalise(ordered, fallback_index=choice_id if choice_id >= 0 else None)
         if sum(probs) <= 0:  # sum was 0 and choice unrecognised: nothing to fall back on
             raise JevAPIError("malformed response: probabilities sum to 0 and choice is unrecognised",
                               retryable=True, status_tag="200_malformed")
-        pred = max(range(len(LABELS)), key=probs.__getitem__)
+        pred = max(range(len(labels)), key=probs.__getitem__)
         confidence = float(probs[pred])
 
         usage = data.get("usage") or {}

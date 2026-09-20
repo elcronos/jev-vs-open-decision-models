@@ -3,15 +3,20 @@
 The general-English checkpoint at the repo root of ``convaiinnovations/laya`` is downloaded at
 the pinned revision with root-only ``allow_patterns`` (so the ``multilingual/`` and
 ``typed-decisions/`` sub-checkpoints are never fetched), loaded with ``laya.load`` and queried one
-example per ``predict`` call with the frozen instruction and the six labels as ``choice`` criteria.
+example per ``predict`` call with the dataset's frozen instruction and its labels as ``choice``
+criteria. The dataset is a ``datasets_registry.DatasetSpec`` passed at construction (default: the
+emotion spec, so pre-existing calls produce exactly the PROTOCOL.md §3.2 question dict).
 
 Variants (PROTOCOL.md §4):
 
 * ``plain``   - ``criteria[label] = None``  -> ``laya.common.render_options`` renders the bare label.
-* ``defined`` - ``criteria[label] = DEFINITIONS[label]`` -> renders ``"label: definition"``.
+* ``defined`` - ``criteria[label] = definitions[label]`` -> renders ``"label: definition"``
+  (only for datasets with definitions; otherwise a ``ValueError`` is raised).
 
-The library's shipped per-option-count temperature (``choice:6-10``) is applied inside
-``Agent.predict`` and is neither fitted nor overridden here.
+The library's shipped per-option-count temperature (``temperature_by_options[temp_bucket]``, e.g.
+``choice:6-10`` for 6-10 options, ``choice:11+`` for 20) is applied inside ``Agent.predict`` and is
+neither fitted nor overridden here; the bucket and value actually applied are recorded in
+``LoadInfo.extra`` (PROTOCOL_ADDENDUM_v2.md §4).
 
 Run ``python -m models.laya --smoke`` (from the project root) for the 8-row validation smoke test.
 """
@@ -32,9 +37,8 @@ except ModuleNotFoundError:  # pragma: no cover - script-style invocation
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     from models import common
 
+from datasets_registry import EMOTION, DatasetSpec
 from models.common import (
-    DEFINITIONS,
-    INSTRUCTION,
     LABELS,
     LAYA_REPO,
     LAYA_REVISION,
@@ -44,7 +48,8 @@ from models.common import (
     renormalise,
 )
 
-QUESTION_ID = "emotion"
+#: Question id of the primary benchmark (PROTOCOL.md §3.2); other datasets use ``spec.question_id``.
+QUESTION_ID = EMOTION.question_id
 
 # Allow patterns exactly as enumerated in PROTOCOL.md §3.2. ``huggingface_hub`` matches them with
 # ``fnmatch`` against the full repo path, where ``*`` also spans ``/``, so on their own ``*.json``
@@ -72,31 +77,42 @@ def select_device() -> str:
     return "cpu"
 
 
-def build_questions(variant: str) -> Dict[str, Dict[str, Any]]:
-    """The question dict passed to ``agent.predict`` for a variant (PROTOCOL.md §3.2 / §4)."""
-    if variant not in VARIANTS:
-        raise ValueError(f"unknown variant {variant!r}; expected one of {VARIANTS}")
-    if variant == "plain":
-        criteria: Dict[str, Optional[str]] = {label: None for label in LABELS}
-    else:
-        criteria = {label: DEFINITIONS[label] for label in LABELS}
+def build_questions(variant: str, spec: DatasetSpec = EMOTION) -> Dict[str, Dict[str, Any]]:
+    """The question dict passed to ``agent.predict`` for a variant (PROTOCOL.md §3.2 / §4).
+
+    Criteria keys are ``spec.labels`` verbatim; values ``None`` (plain) or the definitions (defined).
+    """
+    criteria: Dict[str, Optional[str]] = spec.criteria(variant, empty=None)
     return {
-        QUESTION_ID: {
+        spec.question_id: {
             "type": "choice",
-            "instructions": INSTRUCTION,
+            "instructions": spec.instruction,
             "criteria": criteria,
         }
     }
 
 
-def rendered_options(variant: str) -> List[str]:
+def rendered_options(variant: str, spec: DatasetSpec = EMOTION) -> List[str]:
     """Exactly the option strings the model sees, via ``laya.common.render_options`` applied to the
     library's internal question representation (``Agent._to_internal``)."""
     from laya.agent import Agent
     from laya.common import render_options
 
-    internal = Agent._to_internal(build_questions(variant)[QUESTION_ID])
+    internal = Agent._to_internal(build_questions(variant, spec)[spec.question_id])
     return render_options(internal)
+
+
+def temperature_bucket(n_options: int) -> str:
+    """Name of Laya's shipped temperature bucket for a ``choice`` question with ``n_options`` options
+    (``laya.agent.temp_bucket``: ``choice:2``, ``choice:3-5``, ``choice:6-10``, ``choice:11+``)."""
+    try:
+        from laya.agent import QTYPES, temp_bucket
+
+        return str(temp_bucket(QTYPES["choice"], int(n_options)))
+    except Exception:  # noqa: BLE001 - mirror of the library rule (laya 0.3.3) as a fallback
+        k = int(n_options)
+        size = "2" if k <= 2 else "3-5" if k <= 5 else "6-10" if k <= 10 else "11+"
+        return f"choice:{size}"
 
 
 def _sync_device(device: str) -> None:
@@ -112,7 +128,9 @@ class LayaBackend:
 
     name: str = "laya"
 
-    def __init__(self, device: Optional[str] = None, local_dir: Optional[str] = None) -> None:
+    def __init__(self, device: Optional[str] = None, local_dir: Optional[str] = None,
+                 spec: DatasetSpec = EMOTION) -> None:
+        self.spec = spec
         self.device: str = device or select_device()
         self._local_dir: Optional[str] = local_dir
         self.agent: Any = None
@@ -160,6 +178,10 @@ class LayaBackend:
         weight_bytes = os.path.getsize(weights_path) if os.path.exists(weights_path) else None
         param_count = int(sum(p.numel() for p in self.agent.model.parameters()))
         cfg = self.agent.cfg
+        # The temperature bucket the library applies to *this* dataset's option count (recorded, not altered).
+        bucket = temperature_bucket(self.spec.n_classes)
+        temps_by_options = dict(self.agent.temperature_by_options)
+        temperature_applied = float(temps_by_options.get(bucket, self.agent.temperature[0]))
 
         self._sample_peak_memory()
         self.load_info = LoadInfo(
@@ -174,8 +196,13 @@ class LayaBackend:
                 "repo": LAYA_REPO,
                 "local_dir": local_dir,
                 "laya_version": getattr(laya, "__version__", None),
-                "temperature_by_options": dict(self.agent.temperature_by_options),
+                "temperature_by_options": temps_by_options,
                 "temperature": list(self.agent.temperature),
+                "dataset": self.spec.key,
+                "question_id": self.spec.question_id,
+                "n_options": self.spec.n_classes,
+                "temperature_bucket_applied": bucket,
+                "temperature_applied": temperature_applied,
                 "head_max_len": cfg.get("head_max_len", 192),
                 "max_len": cfg.get("max_len", 512),
                 "encoder": cfg.get("encoder"),
@@ -200,7 +227,7 @@ class LayaBackend:
     def predict_one(self, dataset_index: int, text: str, variant: str = "plain") -> Prediction:
         """Score one example (batch size 1). ``latency_ms`` covers only ``agent.predict``."""
         agent = self._require_agent()
-        questions = build_questions(variant)
+        questions = build_questions(variant, self.spec)
         try:
             _sync_device(self.device)
             t0 = time.perf_counter()
@@ -210,7 +237,7 @@ class LayaBackend:
         except Exception as exc:  # noqa: BLE001 - recorded per example, never raised
             return Prediction(
                 dataset_index=dataset_index,
-                probs=[math.nan] * len(LABELS),
+                probs=[math.nan] * self.spec.n_classes,
                 pred=-1,
                 confidence=math.nan,
                 latency_ms=math.nan,
@@ -226,16 +253,17 @@ class LayaBackend:
         return [self.predict_one(int(idx), str(text), variant) for idx, text in items]
 
     def _to_prediction(self, dataset_index: int, variant: str, out: Dict[str, Any], latency_ms: float) -> Prediction:
-        answer = out["answers"][QUESTION_ID]
+        labels = self.spec.labels
+        answer = out["answers"][self.spec.question_id]
         raw_probs: Dict[str, float] = {str(k): float(v) for k, v in answer["probabilities"].items()}
         api_choice: str = str(answer["choice"])
-        missing = [label for label in LABELS if label not in raw_probs]
+        missing = [label for label in labels if label not in raw_probs]
         if missing:
             raise KeyError(f"laya response is missing probabilities for labels {missing}: {raw_probs}")
 
-        fallback = LABELS.index(api_choice) if api_choice in LABELS else None
-        probs = renormalise([raw_probs[label] for label in LABELS], fallback_index=fallback)
-        pred = int(max(range(len(LABELS)), key=probs.__getitem__))
+        fallback = labels.index(api_choice) if api_choice in labels else None
+        probs = renormalise([raw_probs[label] for label in labels], fallback_index=fallback)
+        pred = int(max(range(len(labels)), key=probs.__getitem__))
         confidence = float(probs[pred])
 
         action = answer.get("action") or {}
@@ -249,7 +277,7 @@ class LayaBackend:
             ),
             "raw_probs": raw_probs,
             "input_tokens": int(usage["input_tokens"]) if "input_tokens" in usage else None,
-            "pred_mismatch": LABELS[pred] != api_choice,
+            "pred_mismatch": labels[pred] != api_choice,
             "model": out.get("model"),
         }
         return Prediction(

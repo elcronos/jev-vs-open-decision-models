@@ -268,7 +268,12 @@ def test_summarize_model_is_json_serialisable() -> None:
 def test_input_validation() -> None:
     with pytest.raises(ValueError):
         M.accuracy(np.array([0, 1]), np.array([0]))
+    # class count is dynamic (probs.shape[1]): 5 columns are fine, but the gold id must fit ...
+    assert M.nll(np.array([0]), np.full((1, 5), 0.2)) == pytest.approx(-math.log(0.2))
     with pytest.raises(ValueError):
-        M.nll(np.array([0]), np.ones((1, 5)))
-    with pytest.raises(ValueError):
+        M.nll(np.array([5]), np.ones((1, 5)))
+    with pytest.raises(ValueError):  # ... and a single column is not a categorical distribution
+        M.nll(np.array([0]), np.ones((1, 1)))
+    with pytest.raises(ValueError):  # label-only functions default to the six primary classes
         M.accuracy(np.array([0, 6]), np.array([0, 0]))
+    assert M.accuracy(np.array([0, 6]), np.array([0, 6]), n_classes=7) == 1.0

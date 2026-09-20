@@ -19,7 +19,7 @@ instead of raising)::
       "ece" | "ece_15":  float,                   # optional; recomputed from bins if absent
       "per_class":       {label: {"precision": f, "recall": f, "f1": f, "support": int}}
                          | [{"label": str, "precision": f, "recall": f, "f1": f, "support": int}, ...],
-      "confusion_matrix": [[int]*6]*6,            # rows = gold, cols = predicted, LABELS order
+      "confusion_matrix": [[int]*K]*K,            # rows = gold, cols = predicted, label order
       "reliability_bins" | "reliability_15":
                          [{"lower": f, "upper": f, "count": int, "mean_conf": f, "acc": f}, ...],
       "risk_coverage":   {"coverage": [f, ...], "risk": [f, ...]},
@@ -27,6 +27,12 @@ instead of raising)::
 
 Both spellings are accepted so the native output of ``metrics.summarize_model`` (dict CIs,
 list-form ``per_class``, ``reliability_15`` / ``ece_15``) can be passed through unchanged.
+
+``labels`` : the dataset's label strings in id order (``DatasetSpec.labels``). When omitted it is
+inferred from the list-form ``per_class`` table of the first summary and falls back to the primary
+benchmark's ``LABELS``; the six-class figures are therefore unchanged. Per-class and confusion
+figures scale with the class count (7 for ``daily_dialog``, 20 for ``fin_topic``): larger panels,
+smaller cell annotations and rotated tick labels beyond six classes.
 
 ``df`` : the raw predictions DataFrame (``results/raw_predictions.parquet``) with columns
 ``gold_id``, ``variant`` and, per model prefix ``p`` in {``jev``, ``laya``, ``prismnli``},
@@ -66,6 +72,7 @@ __all__ = [
     "SUMMARY_KEYS",
     "MODEL_PREFIXES",
     "model_colors",
+    "infer_labels",
     "plot_accuracy_f1_ci",
     "plot_per_class_f1",
     "plot_confusion_matrices",
@@ -241,6 +248,25 @@ def _finite(values: Any) -> np.ndarray:
     return arr[np.isfinite(arr)]
 
 
+def infer_labels(
+    summaries: Mapping[str, Mapping[str, Any]], labels: Optional[Sequence[str]] = None
+) -> List[str]:
+    """Label strings in id order: explicit ``labels`` > list-form ``per_class`` of a summary > ``LABELS``."""
+    if labels is not None:
+        return [str(x) for x in labels]
+    for s in summaries.values():
+        per_class = s.get("per_class")
+        if isinstance(per_class, (list, tuple)) and per_class:
+            rows = [r for r in per_class if isinstance(r, Mapping) and "label" in r]
+            if rows:
+                rows = sorted(rows, key=lambda r: int(r.get("label_id", 0)))
+                return [str(r["label"]) for r in rows]
+        cm = s.get("confusion_matrix")
+        if cm is not None and np.asarray(cm).ndim == 2 and np.asarray(cm).shape[0] != len(LABELS):
+            return [str(i) for i in range(np.asarray(cm).shape[0])]
+    return list(LABELS)
+
+
 def _ece_from_bins(bins: Sequence[Mapping[str, Any]]) -> Optional[float]:
     total = sum(int(b.get("count", 0) or 0) for b in bins)
     if total <= 0:
@@ -298,20 +324,28 @@ def plot_accuracy_f1_ci(
 
 
 def plot_per_class_f1(
-    summaries: Mapping[str, Mapping[str, Any]], out_dir: Union[str, Path], stem: str = "per_class_f1"
+    summaries: Mapping[str, Mapping[str, Any]],
+    out_dir: Union[str, Path],
+    stem: str = "per_class_f1",
+    labels: Optional[Sequence[str]] = None,
 ) -> List[Path]:
-    """Grouped bars: per-class F1 for every model, classes in canonical LABELS order."""
+    """Grouped bars: per-class F1 for every model, classes in dataset label order.
+
+    Beyond six classes the figure widens with the class count and tick labels are rotated."""
     names = list(summaries)
     colors = model_colors(names)
+    labels = infer_labels(summaries, labels)
+    n_lab = len(labels)
+    many = n_lab > len(LABELS)
     k = max(len(names), 1)
     width = 0.8 / k
-    x = np.arange(len(LABELS))
+    x = np.arange(n_lab)
     with plt.rc_context(_RC):
-        fig, ax = plt.subplots(figsize=(7.0, 3.2))
+        fig, ax = plt.subplots(figsize=(max(7.0, 2.0 + 0.6 * n_lab) if many else 7.0, 3.6 if many else 3.2))
         for i, n in enumerate(names):
             per_class = _per_class_map(summaries[n])
             vals = []
-            for lab in LABELS:
+            for lab in labels:
                 f1 = (per_class.get(lab) or {}).get("f1")
                 vals.append(float(f1) if f1 is not None else np.nan)
             offs = x - 0.4 + width * (i + 0.5)
@@ -322,9 +356,12 @@ def plot_per_class_f1(
             for b, v in zip(bars, vals):
                 if math.isfinite(v):
                     ax.text(b.get_x() + b.get_width() / 2, v + 0.01, f"{v:.2f}", ha="center", va="bottom",
-                            fontsize=6.5, color=INK, rotation=90)
+                            fontsize=5.0 if many else 6.5, color=INK, rotation=90)
         ax.set_xticks(x)
-        ax.set_xticklabels(LABELS)
+        if many:
+            ax.set_xticklabels(labels, rotation=45, ha="right", fontsize=7)
+        else:
+            ax.set_xticklabels(labels)
         ax.set_ylim(0, 1.12)
         ax.set_ylabel("F1")
         ax.set_title("Per-class F1", loc="left")
@@ -335,15 +372,28 @@ def plot_per_class_f1(
 
 
 def plot_confusion_matrices(
-    summaries: Mapping[str, Mapping[str, Any]], out_dir: Union[str, Path], stem: str = "confusion_matrices"
+    summaries: Mapping[str, Mapping[str, Any]],
+    out_dir: Union[str, Path],
+    stem: str = "confusion_matrices",
+    labels: Optional[Sequence[str]] = None,
 ) -> List[Path]:
     """One row-normalised confusion-matrix heatmap per model (shared 0..1 colour scale),
-    raw counts annotated in each cell (rows = gold, columns = predicted)."""
+    raw counts annotated in each cell (rows = gold, columns = predicted).
+
+    Panel size grows with the class count and the annotation font shrinks (6.5 pt up to six
+    classes, ~4 pt at twenty) so the 20-class figure stays legible."""
     names = list(summaries)
     k = max(len(names), 1)
-    n_lab = len(LABELS)
+    labels = infer_labels(summaries, labels)
+    n_lab = len(labels)
+    if n_lab <= len(LABELS):
+        panel, cell_fs, tick_fs = 3.1, 6.5, None
+    elif n_lab <= 10:
+        panel, cell_fs, tick_fs = 3.6, 6.0, 7.5
+    else:  # 11+ classes (fin_topic: 20): larger panel, ~4.5 pt cells, 6 pt ticks
+        panel, cell_fs, tick_fs = 5.6, 4.5, 6.0
     with plt.rc_context(_RC):
-        fig, axes = plt.subplots(1, k, figsize=(3.1 * k + 0.8, 3.4), squeeze=False)
+        fig, axes = plt.subplots(1, k, figsize=(panel * k + 0.8, panel + 0.3), squeeze=False)
         axes = axes[0]
         im = None
         for ax, n in zip(axes, names):
@@ -362,12 +412,16 @@ def plot_confusion_matrices(
             im = ax.imshow(norm, cmap=SEQUENTIAL_CMAP, vmin=0.0, vmax=1.0, aspect="equal")
             for i in range(n_lab):
                 for j in range(n_lab):
-                    ax.text(j, i, f"{int(round(counts[i, j]))}", ha="center", va="center", fontsize=6.5,
+                    ax.text(j, i, f"{int(round(counts[i, j]))}", ha="center", va="center", fontsize=cell_fs,
                             color=SURFACE if norm[i, j] > 0.55 else INK)
             ax.set_xticks(range(n_lab))
             ax.set_yticks(range(n_lab))
-            ax.set_xticklabels(LABELS, rotation=45, ha="right")
-            ax.set_yticklabels(LABELS if ax is axes[0] else [])
+            if tick_fs is None:
+                ax.set_xticklabels(labels, rotation=45, ha="right")
+                ax.set_yticklabels(labels if ax is axes[0] else [])
+            else:
+                ax.set_xticklabels(labels, rotation=45, ha="right", fontsize=tick_fs)
+                ax.set_yticklabels(labels if ax is axes[0] else [], fontsize=tick_fs)
             ax.set_xlabel("predicted")
             if ax is axes[0]:
                 ax.set_ylabel("gold")
@@ -596,20 +650,23 @@ def make_all_plots(
     out_dir: Union[str, Path],
     model_prefixes: Optional[Mapping[str, str]] = None,
     variant: Optional[str] = "plain",
+    labels: Optional[Sequence[str]] = None,
 ) -> List[Path]:
     """Produce every figure and return the list of written files.
 
     ``model_prefixes`` maps display name -> DataFrame column prefix; when omitted it is
     inferred from the display names via ``MODEL_PREFIXES`` (``"Jev"`` -> ``"jev"``, ...).
     ``latencies`` may be ``None``, in which case per-example latencies are pulled from
-    ``df["{prefix}_latency_ms"]`` for the chosen ``variant``.
+    ``df["{prefix}_latency_ms"]`` for the chosen ``variant``. ``labels`` are the dataset's label
+    strings in id order (inferred from the summaries when omitted, see :func:`infer_labels`).
     """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+    labels = infer_labels(summaries, labels)
     written: List[Path] = []
     written += plot_accuracy_f1_ci(summaries, out_dir)
-    written += plot_per_class_f1(summaries, out_dir)
-    written += plot_confusion_matrices(summaries, out_dir)
+    written += plot_per_class_f1(summaries, out_dir, labels=labels)
+    written += plot_confusion_matrices(summaries, out_dir, labels=labels)
     written += plot_reliability(summaries, out_dir)
     written += plot_risk_coverage(summaries, out_dir)
 
@@ -637,18 +694,18 @@ def make_all_plots(
 # --------------------------------------------------------------------------------------
 # Self-test on synthetic data (no real model or dataset involved)
 # --------------------------------------------------------------------------------------
-def _synthetic_summary(gold: np.ndarray, probs: np.ndarray) -> Dict[str, Any]:
+def _synthetic_summary(gold: np.ndarray, probs: np.ndarray, labels: Sequence[str] = LABELS) -> Dict[str, Any]:
     """Minimal stand-in for metrics.summarize_model producing the documented shape."""
     pred = probs.argmax(axis=1)
     conf = probs.max(axis=1)
     correct = pred == gold
-    n_lab = len(LABELS)
+    n_lab = len(labels)
     cm = np.zeros((n_lab, n_lab), dtype=int)
     for g, p in zip(gold, pred):
         cm[g, p] += 1
     per_class: Dict[str, Dict[str, float]] = {}
     f1s = []
-    for i, lab in enumerate(LABELS):
+    for i, lab in enumerate(labels):
         tp = cm[i, i]
         prec = tp / cm[:, i].sum() if cm[:, i].sum() else 0.0
         rec = tp / cm[i].sum() if cm[i].sum() else 0.0
@@ -682,28 +739,29 @@ def _synthetic_summary(gold: np.ndarray, probs: np.ndarray) -> Dict[str, Any]:
     }
 
 
-def _selftest(out_dir: Union[str, Path], n: int = 2000) -> List[Path]:
+def _selftest(out_dir: Union[str, Path], n: int = 2000, labels: Sequence[str] = LABELS) -> List[Path]:
     """Build N synthetic rows for three fake models, run make_all_plots, assert every file exists."""
     rng = np.random.default_rng(0)
-    n_lab = len(LABELS)
+    labels = list(labels)
+    n_lab = len(labels)
     gold = rng.integers(0, n_lab, size=n)
     fake = {"Jev (fake)": ("jev", 2.2, 900.0), "Laya (fake)": ("laya", 1.4, 12.0), "PrismNLI-0.4B (fake)": ("prismnli", 1.0, 45.0)}
     df = pd.DataFrame({"dataset_index": np.arange(n), "variant": "plain", "gold_id": gold,
-                       "gold_label": [LABELS[g] for g in gold]})
+                       "gold_label": [labels[g] for g in gold]})
     summaries: Dict[str, Any] = {}
     for name, (prefix, sharpness, lat_scale) in fake.items():
         logits = rng.normal(size=(n, n_lab))
         logits[np.arange(n), gold] += sharpness
         probs = np.exp(logits) / np.exp(logits).sum(axis=1, keepdims=True)
-        summaries[name] = _synthetic_summary(gold, probs)
+        summaries[name] = _synthetic_summary(gold, probs, labels)
         df[f"{prefix}_pred"] = probs.argmax(axis=1)
-        for i, lab in enumerate(LABELS):
+        for i, lab in enumerate(labels):
             df[f"{prefix}_p_{lab}"] = probs[:, i]
         df[f"{prefix}_confidence"] = probs.max(axis=1)
         df[f"{prefix}_latency_ms"] = rng.lognormal(mean=np.log(lat_scale), sigma=0.35, size=n)
         df[f"{prefix}_error"] = None
         df[f"{prefix}_retries"] = 0
-    written = make_all_plots(df, summaries, None, out_dir)
+    written = make_all_plots(df, summaries, None, out_dir, labels=labels)
     expected_stems = ["accuracy_macro_f1_ci", "per_class_f1", "confusion_matrices", "reliability",
                       "risk_coverage", "confidence_hist", "latency"]
     for stem in expected_stems:

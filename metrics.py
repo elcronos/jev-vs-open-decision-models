@@ -2,9 +2,13 @@
 
 All functions are pure and operate on numpy arrays:
 
-* ``y_true``  : int array of shape (N,), gold label ids in canonical ``LABELS`` order (0..5).
-* ``probs``   : float array of shape (N, 6), one *renormalised* categorical distribution per row
+* ``y_true``  : int array of shape (N,), gold label ids in dataset label order (0..K-1).
+* ``probs``   : float array of shape (N, K), one *renormalised* categorical distribution per row
                 (``Prediction.probs``). Predictions are ``argmax(probs, axis=1)``.
+
+The class count ``K`` is dynamic (PROTOCOL_ADDENDUM_v2.md §5): functions that receive ``probs`` take
+it from ``probs.shape[1]``; label-only functions take an ``n_classes`` argument that defaults to
+``N_CLASSES`` (= 6, the primary benchmark), so every pre-existing call keeps working unchanged.
 * ``dataset_index`` : int array of shape (N,), row position in the evaluated split; used only as
                 a deterministic tie-breaker when sorting by confidence.
 
@@ -29,6 +33,7 @@ Nothing in this module reads the dataset, so it can never touch the test split o
 from __future__ import annotations
 
 import math
+from functools import partial
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
@@ -38,6 +43,8 @@ from statsmodels.stats.contingency_tables import mcnemar as _sm_mcnemar
 
 from models.common import LABELS, SEED
 
+#: Default class count for label-only functions (the primary six-way benchmark). Runs on other
+#: datasets pass ``n_classes`` explicitly; probability-based functions never use this constant.
 N_CLASSES: int = len(LABELS)
 NLL_EPS: float = 1e-6
 ECE_EQUAL_WIDTH_BINS: int = 15
@@ -53,8 +60,16 @@ MetricFn = Callable[[np.ndarray, np.ndarray], float]
 # --------------------------------------------------------------------------------------------
 
 
-def _as_labels(y: Any, name: str = "y") -> np.ndarray:
-    """Coerce to a 1-D int64 array of label ids and validate the range."""
+def _resolve_n_classes(n_classes: Optional[int]) -> int:
+    k = N_CLASSES if n_classes is None else int(n_classes)
+    if k < 2:
+        raise ValueError(f"n_classes must be >= 2, got {k}")
+    return k
+
+
+def _as_labels(y: Any, name: str = "y", n_classes: Optional[int] = None) -> np.ndarray:
+    """Coerce to a 1-D int64 array of label ids and validate the range ``[0, n_classes)``."""
+    k = _resolve_n_classes(n_classes)
     arr = np.asarray(y)
     if arr.ndim != 1:
         raise ValueError(f"{name} must be 1-D, got shape {arr.shape}")
@@ -65,16 +80,18 @@ def _as_labels(y: Any, name: str = "y") -> np.ndarray:
             raise ValueError(f"{name} must contain integer label ids")
         arr = arr.astype(np.int64)
     arr = arr.astype(np.int64, copy=False)
-    if arr.min() < 0 or arr.max() >= N_CLASSES:
-        raise ValueError(f"{name} must be in [0, {N_CLASSES - 1}]")
+    if arr.min() < 0 or arr.max() >= k:
+        raise ValueError(f"{name} must be in [0, {k - 1}]")
     return arr
 
 
-def _as_probs(probs: Any, n: Optional[int] = None) -> np.ndarray:
-    """Coerce to a float64 (N, 6) array and validate shape."""
+def _as_probs(probs: Any, n: Optional[int] = None, n_classes: Optional[int] = None) -> np.ndarray:
+    """Coerce to a float64 (N, K) array and validate shape (``K = n_classes`` if given, else any K >= 2)."""
     arr = np.asarray(probs, dtype=np.float64)
-    if arr.ndim != 2 or arr.shape[1] != N_CLASSES:
-        raise ValueError(f"probs must have shape (N, {N_CLASSES}), got {arr.shape}")
+    if arr.ndim != 2 or arr.shape[1] < 2:
+        raise ValueError(f"probs must have shape (N, K>=2), got {arr.shape}")
+    if n_classes is not None and arr.shape[1] != int(n_classes):
+        raise ValueError(f"probs must have shape (N, {int(n_classes)}), got {arr.shape}")
     if n is not None and arr.shape[0] != n:
         raise ValueError(f"probs has {arr.shape[0]} rows but y_true has {n}")
     if not np.all(np.isfinite(arr)):
@@ -88,6 +105,15 @@ def _check_same_length(*arrays: np.ndarray) -> None:
         raise ValueError(f"arrays must have the same length, got {sorted(lengths)}")
 
 
+def _labels_for_probs(y_true: Any, probs: Any, name: str = "y_true") -> Tuple[np.ndarray, np.ndarray]:
+    """Validate a ``(y_true, probs)`` pair; the class count comes from ``probs.shape[1]``."""
+    pr = _as_probs(probs)
+    yt = _as_labels(y_true, name, n_classes=pr.shape[1])
+    if pr.shape[0] != yt.shape[0]:
+        raise ValueError(f"probs has {pr.shape[0]} rows but {name} has {yt.shape[0]}")
+    return yt, pr
+
+
 def predictions(probs: Any) -> np.ndarray:
     """Argmax prediction per row (first index wins ties, matching ``numpy.argmax``)."""
     return np.argmax(_as_probs(probs), axis=1).astype(np.int64)
@@ -98,56 +124,90 @@ def predictions(probs: Any) -> np.ndarray:
 # --------------------------------------------------------------------------------------------
 
 
-def accuracy(y_true: Any, y_pred: Any) -> float:
+def accuracy(y_true: Any, y_pred: Any, n_classes: Optional[int] = None) -> float:
     """Fraction of rows where ``y_pred == y_true``."""
-    yt, yp = _as_labels(y_true, "y_true"), _as_labels(y_pred, "y_pred")
+    yt = _as_labels(y_true, "y_true", n_classes)
+    yp = _as_labels(y_pred, "y_pred", n_classes)
     _check_same_length(yt, yp)
     return float(np.mean(yt == yp))
 
 
-def macro_f1(y_true: Any, y_pred: Any) -> float:
-    """Unweighted mean of per-class F1 over all six labels.
+def majority_class_id(y_true: Any, n_classes: Optional[int] = None) -> int:
+    """Id of the most frequent gold label (lowest id wins ties)."""
+    yt = _as_labels(y_true, "y_true", n_classes)
+    return int(np.argmax(np.bincount(yt, minlength=_resolve_n_classes(n_classes))))
+
+
+def majority_class_accuracy(y_true: Any, n_classes: Optional[int] = None) -> float:
+    """Accuracy of the constant predictor that always outputs the most frequent gold label
+    (PROTOCOL_ADDENDUM_v2.md §1: reported next to every accuracy)."""
+    yt = _as_labels(y_true, "y_true", n_classes)
+    return float(np.max(np.bincount(yt, minlength=_resolve_n_classes(n_classes))) / yt.shape[0])
+
+
+def macro_f1(y_true: Any, y_pred: Any, n_classes: Optional[int] = None) -> float:
+    """Unweighted mean of per-class F1 over all ``n_classes`` labels (default: the six of the primary run).
 
     Classes with zero predicted *and* zero gold occurrences contribute F1 = 0 (sklearn's
     ``zero_division=0`` convention), so results match
-    ``sklearn.metrics.f1_score(average="macro", labels=range(6), zero_division=0)``.
+    ``sklearn.metrics.f1_score(average="macro", labels=range(n_classes), zero_division=0)``.
     Implemented with ``numpy.bincount`` so it is fast enough for 10 000 bootstrap resamples.
     """
-    yt, yp = _as_labels(y_true, "y_true"), _as_labels(y_pred, "y_pred")
+    k = _resolve_n_classes(n_classes)
+    yt = _as_labels(y_true, "y_true", k)
+    yp = _as_labels(y_pred, "y_pred", k)
     _check_same_length(yt, yp)
-    tp = np.bincount(yt[yt == yp], minlength=N_CLASSES).astype(np.float64)
-    pred_count = np.bincount(yp, minlength=N_CLASSES).astype(np.float64)
-    gold_count = np.bincount(yt, minlength=N_CLASSES).astype(np.float64)
+    tp = np.bincount(yt[yt == yp], minlength=k).astype(np.float64)
+    pred_count = np.bincount(yp, minlength=k).astype(np.float64)
+    gold_count = np.bincount(yt, minlength=k).astype(np.float64)
     denom = pred_count + gold_count  # 2*TP + FP + FN
-    f1 = np.divide(2.0 * tp, denom, out=np.zeros(N_CLASSES), where=denom > 0)
+    f1 = np.divide(2.0 * tp, denom, out=np.zeros(k), where=denom > 0)
     return float(np.mean(f1))
 
 
-def per_class_report(y_true: Any, y_pred: Any) -> List[Dict[str, Any]]:
-    """Per-label precision / recall / F1 / support (gold count), in canonical label order."""
-    yt, yp = _as_labels(y_true, "y_true"), _as_labels(y_pred, "y_pred")
+def _label_names(n_classes: int, label_names: Optional[Sequence[str]]) -> List[str]:
+    if label_names is not None:
+        names = [str(x) for x in label_names]
+        if len(names) != n_classes:
+            raise ValueError(f"label_names has {len(names)} entries for {n_classes} classes")
+        return names
+    if n_classes == len(LABELS):
+        return list(LABELS)
+    return [str(i) for i in range(n_classes)]
+
+
+def per_class_report(y_true: Any, y_pred: Any, n_classes: Optional[int] = None,
+                     label_names: Optional[Sequence[str]] = None) -> List[Dict[str, Any]]:
+    """Per-label precision / recall / F1 / support (gold count), in dataset label order.
+
+    ``label_names`` defaults to ``LABELS`` for six classes and to ``"0".."K-1"`` otherwise.
+    """
+    k = _resolve_n_classes(n_classes)
+    yt = _as_labels(y_true, "y_true", k)
+    yp = _as_labels(y_pred, "y_pred", k)
     _check_same_length(yt, yp)
-    p, r, f, s = precision_recall_fscore_support(
-        yt, yp, labels=list(range(N_CLASSES)), zero_division=0
-    )
+    names = _label_names(k, label_names)
+    p, r, f, s = precision_recall_fscore_support(yt, yp, labels=list(range(k)), zero_division=0)
     return [
         {
             "label_id": i,
-            "label": LABELS[i],
+            "label": names[i],
             "precision": float(p[i]),
             "recall": float(r[i]),
             "f1": float(f[i]),
             "support": int(s[i]),
         }
-        for i in range(N_CLASSES)
+        for i in range(k)
     ]
 
 
-def confusion_matrix(y_true: Any, y_pred: Any) -> np.ndarray:
-    """6x6 confusion matrix, rows = gold label, columns = predicted label."""
-    yt, yp = _as_labels(y_true, "y_true"), _as_labels(y_pred, "y_pred")
+def confusion_matrix(y_true: Any, y_pred: Any, n_classes: Optional[int] = None) -> np.ndarray:
+    """KxK confusion matrix, rows = gold label, columns = predicted label."""
+    k = _resolve_n_classes(n_classes)
+    yt = _as_labels(y_true, "y_true", k)
+    yp = _as_labels(y_pred, "y_pred", k)
     _check_same_length(yt, yp)
-    return _sk_confusion_matrix(yt, yp, labels=list(range(N_CLASSES))).astype(np.int64)
+    return _sk_confusion_matrix(yt, yp, labels=list(range(k))).astype(np.int64)
 
 
 # --------------------------------------------------------------------------------------------
@@ -157,8 +217,7 @@ def confusion_matrix(y_true: Any, y_pred: Any) -> np.ndarray:
 
 def gold_probs(y_true: Any, probs: Any) -> np.ndarray:
     """Probability assigned to the gold label, shape (N,)."""
-    yt = _as_labels(y_true, "y_true")
-    pr = _as_probs(probs, yt.shape[0])
+    yt, pr = _labels_for_probs(y_true, probs)
     return pr[np.arange(yt.shape[0]), yt]
 
 
@@ -174,8 +233,7 @@ def nll(y_true: Any, probs: Any, eps: float = NLL_EPS) -> float:
 
 def brier_multiclass(y_true: Any, probs: Any) -> float:
     """Multiclass Brier score ``mean(sum_k (p_k - onehot_k)^2)``; range ``[0, 2]``."""
-    yt = _as_labels(y_true, "y_true")
-    pr = _as_probs(probs, yt.shape[0])
+    yt, pr = _labels_for_probs(y_true, probs)
     onehot = np.zeros_like(pr)
     onehot[np.arange(yt.shape[0]), yt] = 1.0
     return float(np.mean(np.sum((pr - onehot) ** 2, axis=1)))
@@ -234,8 +292,7 @@ def ece_equal_width(
     """
     if n_bins < 1:
         raise ValueError("n_bins must be >= 1")
-    yt = _as_labels(y_true, "y_true")
-    pr = _as_probs(probs, yt.shape[0])
+    yt, pr = _labels_for_probs(y_true, probs)
     conf = np.max(pr, axis=1)
     if conf.min() < 0.0 or conf.max() > 1.0:
         raise ValueError("confidences must lie in [0, 1]")
@@ -260,8 +317,7 @@ def ece_adaptive(
     """
     if n_bins < 1:
         raise ValueError("n_bins must be >= 1")
-    yt = _as_labels(y_true, "y_true")
-    pr = _as_probs(probs, yt.shape[0])
+    yt, pr = _labels_for_probs(y_true, probs)
     n = yt.shape[0]
     conf = np.max(pr, axis=1)
     correct = np.argmax(pr, axis=1) == yt
@@ -301,8 +357,7 @@ def risk_coverage_curve(
     (``k = 1..N``), ``coverage[k-1] = k / N`` and ``risk[k-1]`` = error rate among those ``k`` rows.
     Ordering is confidence descending with ``dataset_index`` ascending as tie-breaker.
     """
-    yt = _as_labels(y_true, "y_true")
-    pr = _as_probs(probs, yt.shape[0])
+    yt, pr = _labels_for_probs(y_true, probs)
     order = selective_order(pr, dataset_index)
     wrong = (np.argmax(pr, axis=1) != yt)[order].astype(np.float64)
     k = np.arange(1, yt.shape[0] + 1, dtype=np.float64)
@@ -321,8 +376,7 @@ def accuracy_at_coverage(
 
     Keys are the coverage levels formatted as strings (e.g. ``"0.5"``) so the result is JSON-safe.
     """
-    yt = _as_labels(y_true, "y_true")
-    pr = _as_probs(probs, yt.shape[0])
+    yt, pr = _labels_for_probs(y_true, probs)
     n = yt.shape[0]
     order = selective_order(pr, dataset_index)
     correct = (np.argmax(pr, axis=1) == yt)[order]
@@ -353,13 +407,17 @@ def bootstrap_ci(
     n: int = BOOTSTRAP_N,
     seed: int = SEED,
     alpha: float = 0.05,
+    n_classes: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Percentile bootstrap CI for ``metric_fn(y_true, y_pred)``.
 
     Returns ``{"point", "low", "high", "n", "seed", "alpha"}`` where ``low``/``high`` are the
-    ``100*alpha/2`` and ``100*(1-alpha/2)`` percentiles of the resampled metric.
+    ``100*alpha/2`` and ``100*(1-alpha/2)`` percentiles of the resampled metric. ``n_classes`` only
+    validates the label range; a class-count-dependent ``metric_fn`` (``macro_f1``) must carry its
+    own ``n_classes`` (e.g. ``functools.partial(macro_f1, n_classes=K)``).
     """
-    yt, yp = _as_labels(y_true, "y_true"), _as_labels(y_pred, "y_pred")
+    yt = _as_labels(y_true, "y_true", n_classes)
+    yp = _as_labels(y_pred, "y_pred", n_classes)
     _check_same_length(yt, yp)
     idx = _bootstrap_indices(yt.shape[0], n, seed)
     stats = np.fromiter((metric_fn(yt[i], yp[i]) for i in idx), dtype=np.float64, count=n)
@@ -381,14 +439,15 @@ def paired_bootstrap_accuracy_diff(
     n: int = BOOTSTRAP_N,
     seed: int = SEED,
     alpha: float = 0.05,
+    n_classes: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Paired bootstrap of ``accuracy(a) - accuracy(b)`` using the SAME resample indices for both.
 
     Returns point difference, percentile CI, and ``p_value``: the two-sided bootstrap
     p-value ``2 * min(P(diff <= 0), P(diff >= 0))`` clipped to ``[0, 1]``.
     """
-    yt = _as_labels(y_true, "y_true")
-    pa, pb = _as_labels(pred_a, "pred_a"), _as_labels(pred_b, "pred_b")
+    yt = _as_labels(y_true, "y_true", n_classes)
+    pa, pb = _as_labels(pred_a, "pred_a", n_classes), _as_labels(pred_b, "pred_b", n_classes)
     _check_same_length(yt, pa, pb)
     ca = (pa == yt).astype(np.float64)
     cb = (pb == yt).astype(np.float64)
@@ -408,7 +467,7 @@ def paired_bootstrap_accuracy_diff(
     }
 
 
-def mcnemar_exact(y_true: Any, pred_a: Any, pred_b: Any) -> Dict[str, Any]:
+def mcnemar_exact(y_true: Any, pred_a: Any, pred_b: Any, n_classes: Optional[int] = None) -> Dict[str, Any]:
     """Exact McNemar test on correct/incorrect indicators of two models.
 
     Contingency table ``[[both correct, a correct & b wrong], [a wrong & b correct, both wrong]]``
@@ -416,8 +475,8 @@ def mcnemar_exact(y_true: Any, pred_a: Any, pred_b: Any) -> Dict[str, Any]:
     Returns ``{"statistic", "pvalue", "b", "c"}`` with ``b`` = #(a correct, b wrong) and
     ``c`` = #(a wrong, b correct). The exact statistic is ``min(b, c)``.
     """
-    yt = _as_labels(y_true, "y_true")
-    pa, pb = _as_labels(pred_a, "pred_a"), _as_labels(pred_b, "pred_b")
+    yt = _as_labels(y_true, "y_true", n_classes)
+    pa, pb = _as_labels(pred_a, "pred_a", n_classes), _as_labels(pred_b, "pred_b", n_classes)
     _check_same_length(yt, pa, pb)
     ca, cb = pa == yt, pb == yt
     both = int(np.sum(ca & cb))
@@ -452,20 +511,24 @@ def summarize_model(
     dataset_index: Any,
     n_bootstrap: int = BOOTSTRAP_N,
     seed: int = SEED,
+    label_names: Optional[Sequence[str]] = None,
 ) -> Dict[str, Any]:
     """All PROTOCOL.md §5 single-model metrics as a JSON-serialisable dict.
 
-    Scalar keys: ``n, accuracy, macro_f1, nll, nll_eps, brier, ece_15, ece_adaptive_10,
-    mean_confidence, frac_gold_prob_zero``. Tables: ``per_class`` (list of dicts),
-    ``confusion_matrix`` (6x6 nested list, rows gold), ``reliability_15``/``reliability_adaptive_10``
-    (bin tables), ``accuracy_at_coverage`` (dict), ``risk_coverage`` (``{"coverage": [...], "risk": [...]}``),
+    The class count ``K`` is ``probs.shape[1]``. Scalar keys: ``n, n_classes, accuracy,
+    majority_class_accuracy, macro_f1, nll, nll_eps, brier, ece_15, ece_adaptive_10, mean_confidence,
+    frac_gold_prob_zero``. Tables: ``per_class`` (list of dicts), ``confusion_matrix`` (KxK nested
+    list, rows gold), ``reliability_15``/``reliability_adaptive_10`` (bin tables),
+    ``accuracy_at_coverage`` (dict), ``risk_coverage`` (``{"coverage": [...], "risk": [...]}``),
     ``accuracy_ci``/``macro_f1_ci`` (bootstrap dicts).
     """
-    yt = _as_labels(y_true, "y_true")
-    pr = _as_probs(probs, yt.shape[0])
+    yt, pr = _labels_for_probs(y_true, probs)
+    k = int(pr.shape[1])
     di = np.asarray(dataset_index)
     _check_same_length(yt, di)
     yp = np.argmax(pr, axis=1)
+    acc_k = partial(accuracy, n_classes=k)
+    f1_k = partial(macro_f1, n_classes=k)
 
     ece15, table15 = ece_equal_width(yt, pr, ECE_EQUAL_WIDTH_BINS)
     ece_ad, table_ad = ece_adaptive(yt, pr, ECE_ADAPTIVE_BINS, dataset_index=di)
@@ -473,8 +536,11 @@ def summarize_model(
 
     return {
         "n": int(yt.shape[0]),
-        "accuracy": accuracy(yt, yp),
-        "macro_f1": macro_f1(yt, yp),
+        "n_classes": k,
+        "accuracy": acc_k(yt, yp),
+        "majority_class_accuracy": majority_class_accuracy(yt, k),
+        "majority_class_id": majority_class_id(yt, k),
+        "macro_f1": f1_k(yt, yp),
         "nll": nll(yt, pr),
         "nll_eps": NLL_EPS,
         "brier": brier_multiclass(yt, pr),
@@ -482,10 +548,10 @@ def summarize_model(
         "ece_adaptive_10": ece_ad,
         "mean_confidence": mean_confidence(pr),
         "frac_gold_prob_zero": frac_gold_prob_zero(pr, yt),
-        "accuracy_ci": bootstrap_ci(accuracy, yt, yp, n=n_bootstrap, seed=seed),
-        "macro_f1_ci": bootstrap_ci(macro_f1, yt, yp, n=n_bootstrap, seed=seed),
-        "per_class": per_class_report(yt, yp),
-        "confusion_matrix": confusion_matrix(yt, yp).tolist(),
+        "accuracy_ci": bootstrap_ci(acc_k, yt, yp, n=n_bootstrap, seed=seed, n_classes=k),
+        "macro_f1_ci": bootstrap_ci(f1_k, yt, yp, n=n_bootstrap, seed=seed, n_classes=k),
+        "per_class": per_class_report(yt, yp, k, label_names),
+        "confusion_matrix": confusion_matrix(yt, yp, k).tolist(),
         "reliability_15": table15,
         "reliability_adaptive_10": table_ad,
         "accuracy_at_coverage": accuracy_at_coverage(yt, pr, di, COVERAGE_LEVELS),
@@ -493,12 +559,13 @@ def summarize_model(
     }
 
 
-def compare_models(y_true: Any, pred_a: Any, pred_b: Any, n_bootstrap: int = BOOTSTRAP_N, seed: int = SEED) -> Dict[str, Any]:
+def compare_models(y_true: Any, pred_a: Any, pred_b: Any, n_bootstrap: int = BOOTSTRAP_N, seed: int = SEED,
+                   n_classes: Optional[int] = None) -> Dict[str, Any]:
     """Both PROTOCOL.md §5 paired tests for one model pair, JSON-serialisable."""
     return {
-        "mcnemar_exact": mcnemar_exact(y_true, pred_a, pred_b),
+        "mcnemar_exact": mcnemar_exact(y_true, pred_a, pred_b, n_classes=n_classes),
         "paired_bootstrap_accuracy_diff": paired_bootstrap_accuracy_diff(
-            y_true, pred_a, pred_b, n=n_bootstrap, seed=seed
+            y_true, pred_a, pred_b, n=n_bootstrap, seed=seed, n_classes=n_classes
         ),
     }
 
@@ -512,6 +579,8 @@ __all__ = [
     "BOOTSTRAP_N",
     "predictions",
     "accuracy",
+    "majority_class_id",
+    "majority_class_accuracy",
     "macro_f1",
     "per_class_report",
     "confusion_matrix",

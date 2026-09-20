@@ -4,9 +4,14 @@ Flow
 ----
 1. Seed ``random``, ``numpy`` and ``torch`` with ``models.common.SEED`` and enable deterministic
    algorithms where supported (§8).
-2. Load ``dair-ai/emotion`` (config ``split``) at the pinned revision (§2). The evaluated split is
-   ``--split`` (``test`` for the real run, ``validation`` for smoke tests); warm-up texts are always
-   the first 10 rows of ``validation`` (§6), never of the evaluated split.
+2. Resolve ``--dataset`` to a ``datasets_registry.DatasetSpec`` (default ``emotion`` = PROTOCOL.md §2;
+   ``tweet_topic`` / ``fin_topic`` / ``daily_dialog`` = PROTOCOL_ADDENDUM_v2.md §1) and load either
+   its evaluated split (``--split eval``) or its smoke rows (``--split smoke`` / ``--smoke``). Warm-up
+   texts are always the spec's first 10 smoke rows (§6), never rows of the evaluated split. For
+   ``emotion`` the legacy spellings ``--split test`` (= eval) and ``--split validation`` (= smoke)
+   keep working; every other dataset accepts ONLY ``eval``/``smoke`` (dataset-native split names
+   such as ``test_2021``, ``train`` or fin_topic's evaluated ``validation`` are rejected, so the
+   word ``validation`` can never select an evaluated split by habit).
 3. For every requested backend: ``load()`` (timed), ``warmup()`` per variant, ``predict_many()`` over
    the rows for every requested variant, then ``peak_memory_bytes()``.
 4. Assemble the wide per-(dataset_index, variant) DataFrame of §7. When
@@ -14,6 +19,11 @@ Flow
    models and variants just run are overwritten, so ``plain`` / ``defined`` and per-model runs can be
    executed in separate invocations.
 5. Write ``raw_predictions.parquet``, ``env.json``, ``summary.json``, ``summary.csv`` and the plots.
+
+Output locations: the primary ``emotion`` run keeps ``results/`` (Jev cache ``results/cache/``)
+exactly as before; every other dataset writes to ``results/<key>/`` (cache ``results/<key>/cache/``).
+Smoke runs never touch those files: they go to ``<out_dir>/smoke_<smoke split>/`` (e.g.
+``results/smoke_validation/``) with the Jev cache under ``<cache>/smoke_<smoke split>/``.
 
 Per-example failures never abort the run: such rows carry ``{prefix}_error``, ``pred == -1`` and NaN
 probabilities and their count is reported as ``n_errors``. PROTOCOL.md §5 requires every metric to be
@@ -29,6 +39,8 @@ Usage::
 
     python benchmark.py --split validation --limit 8 --models jev,prismnli,laya --variants plain,defined
     python benchmark.py --split test --models jev,prismnli,laya --variants plain
+    python benchmark.py --dataset fin_topic --split smoke --limit 8 --models jev,prismnli,laya --variants plain
+    python benchmark.py --dataset fin_topic --split eval --models jev,prismnli,laya --variants plain
 
 The OpenRouter key is read by ``models.jev`` from ``OPENROUTER_API_KEY`` and never written anywhere.
 """
@@ -61,6 +73,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 import metrics  # noqa: E402
 import plots  # noqa: E402
+from datasets_registry import DATASET_KEYS, EMOTION, SMOKE_N, DatasetSpec, get_spec  # noqa: E402
 from models.common import (  # noqa: E402
     DATASET_CONFIG,
     DATASET_ID,
@@ -86,18 +99,20 @@ DISPLAY_NAMES: Dict[str, str] = {"jev": "Jev", "prismnli": "PrismNLI-0.4B", "lay
 REMOTE_MODELS = frozenset({"jev"})
 LATENCY_KIND_REMOTE = "remote end-to-end"
 LATENCY_KIND_LOCAL = "local compute"
-WARMUP_N = 10
+WARMUP_N = SMOKE_N
+#: Legacy split spellings of the primary benchmark; ``eval``/``smoke`` are the dataset-agnostic ones.
 SPLITS = ("validation", "test")
+SPLIT_CHOICES = ("eval", "smoke", *SPLITS)
 
 BASE_COLUMNS: Tuple[str, ...] = ("dataset_index", "variant", "split", "text", "gold_id", "gold_label")
-PER_MODEL_COLUMNS: Tuple[str, ...] = (
-    "pred",
-    *(f"p_{label}" for label in LABELS),
-    "confidence",
-    "latency_ms",
-    "error",
-    "retries",
-)
+
+
+def per_model_columns(labels: Sequence[str] = LABELS) -> Tuple[str, ...]:
+    """§7 per-model column suffixes for a label set: ``pred, p_<label>..., confidence, ...``."""
+    return ("pred", *(f"p_{label}" for label in labels), "confidence", "latency_ms", "error", "retries")
+
+
+PER_MODEL_COLUMNS: Tuple[str, ...] = per_model_columns(LABELS)
 MODEL_SPECIFIC_COLUMNS: Dict[str, Tuple[str, ...]] = {
     "jev": (
         "jev_pred_mismatch",
@@ -119,7 +134,9 @@ SUMMARY_CSV_COLUMNS: Tuple[str, ...] = (
     "n",
     "n_valid",
     "n_common",
+    "n_classes",
     "accuracy",
+    "majority_class_accuracy",
     "acc_ci_lo",
     "acc_ci_hi",
     "macro_f1",
@@ -258,21 +275,51 @@ def hardware_info() -> Dict[str, Any]:
 
 
 def load_split(split: str, limit: Optional[int] = None) -> pd.DataFrame:
-    """Rows of the pinned dataset split as ``dataset_index, text, gold_id, gold_label``."""
-    from datasets import load_dataset
+    """Rows of the pinned *emotion* dataset split as ``dataset_index, text, gold_id, gold_label``
+    (kept for backward compatibility; delegates to the emotion spec of ``datasets_registry``)."""
+    if split == EMOTION.eval_split_name:
+        return EMOTION.load_eval(limit)
+    if split == EMOTION.smoke_split_name:
+        return EMOTION.load_smoke(limit)
+    raise ValueError(f"unknown emotion split {split!r}; expected one of {SPLITS}")
 
-    ds = load_dataset(DATASET_ID, DATASET_CONFIG, split=split, revision=DATASET_REVISION)
-    n = len(ds) if limit is None else min(limit, len(ds))
-    rows = ds.select(range(n))
-    labels = np.asarray(rows["label"], dtype=np.int64)
-    return pd.DataFrame(
-        {
-            "dataset_index": np.arange(n, dtype=np.int64),
-            "text": [str(t) for t in rows["text"]],
-            "gold_id": labels,
-            "gold_label": [LABELS[int(i)] for i in labels],
-        }
+
+def resolve_split(spec: DatasetSpec, split: str) -> Tuple[bool, str]:
+    """Map ``--split`` to ``(is_eval, split_name)``.
+
+    ``eval`` / ``smoke`` are the dataset-agnostic spellings and the only ones accepted for the
+    follow-up datasets. The legacy spellings ``test`` (= eval) and ``validation`` (= smoke) are
+    accepted for the primary ``emotion`` benchmark only (PROTOCOL.md §2), where they are its actual
+    split names. Dataset-native names are deliberately NOT accepted elsewhere: ``fin_topic``'s
+    evaluated split is literally called ``validation``, so accepting native names would make the
+    documented smoke spelling score the evaluated split and write into the production Jev cache.
+    """
+    if split == "eval":
+        return True, spec.eval_split_name
+    if split == "smoke":
+        return False, spec.smoke_split_name
+    if spec.key == EMOTION.key and split in SPLITS:
+        # PROTOCOL.md §2 spellings of the primary run: test = evaluated, validation = smoke.
+        return (True, EMOTION.eval_split_name) if split == "test" else (False, EMOTION.smoke_split_name)
+    raise ValueError(
+        f"--split {split!r} is not valid for dataset {spec.key!r}: use 'eval' (= {spec.eval_split_name!r}) "
+        f"or 'smoke' (= {spec.smoke_split_name!r}); the legacy spellings 'test'/'validation' are "
+        f"accepted for dataset 'emotion' only"
     )
+
+
+def default_out_dir(spec: DatasetSpec, is_eval: bool) -> Path:
+    """``results/`` for the primary emotion run, ``results/<key>/`` otherwise; smoke runs go to a
+    ``smoke_<smoke split>/`` sub-directory so the frozen evaluation outputs are never overwritten."""
+    root = RESULTS_DIR if spec.key == EMOTION.key else RESULTS_DIR / spec.key
+    return root if is_eval else root / f"smoke_{spec.smoke_split_name}"
+
+
+def jev_cache_dir(spec: DatasetSpec, is_eval: bool) -> Path:
+    """``results/cache/`` (emotion) or ``results/<key>/cache/``; smoke rows use ``smoke_<split>/`` below it
+    so they can never collide with evaluated-split indices (PROTOCOL.md §3.1)."""
+    root = RESULTS_DIR / "cache" if spec.key == EMOTION.key else RESULTS_DIR / spec.key / "cache"
+    return root if is_eval else root / f"smoke_{spec.smoke_split_name}"
 
 
 # ------------------------------------------------------------------------------------------------
@@ -280,21 +327,23 @@ def load_split(split: str, limit: Optional[int] = None) -> pd.DataFrame:
 # ------------------------------------------------------------------------------------------------
 
 
-def make_backend(name: str, split: str) -> Backend:
-    """Instantiate a backend. The production Jev cache is used for the test split only."""
+def make_backend(name: str, split: str, spec: DatasetSpec = EMOTION, cache_dir: Optional[Path] = None) -> Backend:
+    """Instantiate a backend for ``spec``. The Jev cache is ``cache_dir`` if given, else the
+    production cache for the evaluated split and the smoke cache otherwise."""
     if name == "jev":
-        from models.jev import DEFAULT_CACHE_DIR, SMOKE_CACHE_DIR, JevBackend
+        from models.jev import JevBackend
 
-        cache_dir = DEFAULT_CACHE_DIR if split == "test" else SMOKE_CACHE_DIR
-        return JevBackend(cache_dir=cache_dir, show_progress=True)
+        if cache_dir is None:
+            cache_dir = jev_cache_dir(spec, split == spec.eval_split_name)
+        return JevBackend(cache_dir=cache_dir, spec=spec, show_progress=True)
     if name == "prismnli":
         from models.prismnli import PrismNLIBackend
 
-        return PrismNLIBackend()
+        return PrismNLIBackend(spec=spec)
     if name == "laya":
         from models.laya import LayaBackend
 
-        return LayaBackend()
+        return LayaBackend(spec=spec)
     raise ValueError(f"unknown model {name!r}")
 
 
@@ -330,10 +379,10 @@ class ModelRun:
 
 
 def run_model(name: str, rows: pd.DataFrame, warm_texts: Sequence[str], variants: Sequence[str],
-              split: str) -> ModelRun:
+              split: str, spec: DatasetSpec = EMOTION, cache_dir: Optional[Path] = None) -> ModelRun:
     """Load one backend, warm it up per variant, score every row for every variant."""
     run = ModelRun(name)
-    backend = make_backend(name, split)
+    backend = make_backend(name, split, spec, cache_dir)
     log(f"[{name}] loading ...")
     t0 = time.perf_counter()
     run.load_info = backend.load()
@@ -343,7 +392,7 @@ def run_model(name: str, rows: pd.DataFrame, warm_texts: Sequence[str], variants
     items = list(zip(rows["dataset_index"].astype(int).tolist(), rows["text"].tolist()))
     try:
         for variant in variants:
-            log(f"[{name}] warm-up on {len(warm_texts)} validation rows (variant={variant})")
+            log(f"[{name}] warm-up on {len(warm_texts)} {spec.smoke_split_name!r} smoke rows (variant={variant})")
             backend.warmup(list(warm_texts), variant=variant)
             log(f"[{name}] predicting {len(items)} rows (variant={variant})")
             t1 = time.perf_counter()
@@ -377,12 +426,15 @@ def _json_or_none(value: Any) -> Optional[str]:
     return None if value is None else json.dumps(value)
 
 
-def predictions_frame(name: str, variant: str, preds: Sequence[Prediction]) -> pd.DataFrame:
+def predictions_frame(name: str, variant: str, preds: Sequence[Prediction],
+                      labels: Sequence[str] = LABELS) -> pd.DataFrame:
     """Per-model columns of §7 for one variant, keyed by ``dataset_index`` + ``variant``."""
     p = name
     records: List[Dict[str, Any]] = []
     for pr in preds:
-        probs = list(pr.probs) if pr.error is None else [math.nan] * len(LABELS)
+        probs = list(pr.probs) if pr.error is None else [math.nan] * len(labels)
+        if len(probs) != len(labels):
+            raise RuntimeError(f"{name}: prediction for row {pr.dataset_index} has {len(probs)} probabilities for {len(labels)} labels")
         rec: Dict[str, Any] = {
             "dataset_index": int(pr.dataset_index),
             "variant": variant,
@@ -392,7 +444,7 @@ def predictions_frame(name: str, variant: str, preds: Sequence[Prediction]) -> p
             f"{p}_error": pr.error,
             f"{p}_retries": int(pr.retries),
         }
-        for label, value in zip(LABELS, probs):
+        for label, value in zip(labels, probs):
             rec[f"{p}_p_{label}"] = float(value)
         if name == "jev":
             rec.update(
@@ -439,8 +491,9 @@ def predictions_frame(name: str, variant: str, preds: Sequence[Prediction]) -> p
     return frame
 
 
-def assemble_frame(rows: pd.DataFrame, split: str, runs: Sequence[ModelRun], variants: Sequence[str]) -> pd.DataFrame:
-    """Wide frame for the rows and variants just run: base columns + every model's columns."""
+def assemble_frame(rows: pd.DataFrame, split: str, runs: Sequence[ModelRun], variants: Sequence[str],
+                   labels: Sequence[str] = LABELS) -> pd.DataFrame:
+    """Wide frame for the rows and variants just run: base columns (+ dataset extras) + every model's columns."""
     parts: List[pd.DataFrame] = []
     for variant in variants:
         base = rows.copy()
@@ -450,37 +503,42 @@ def assemble_frame(rows: pd.DataFrame, split: str, runs: Sequence[ModelRun], var
             preds = run.predictions.get(variant)
             if preds is None:
                 continue
-            base = base.merge(predictions_frame(run.name, variant, preds), on=["dataset_index", "variant"], how="left")
+            base = base.merge(predictions_frame(run.name, variant, preds, labels), on=["dataset_index", "variant"], how="left")
         parts.append(base)
     return pd.concat(parts, ignore_index=True)
 
 
-def column_order(columns: Iterable[str]) -> List[str]:
-    """Canonical §7 column order; unknown columns are appended alphabetically."""
+def column_order(columns: Iterable[str], labels: Sequence[str] = LABELS,
+                 extra_columns: Sequence[str] = ()) -> List[str]:
+    """Canonical §7 column order (base, dataset extras, per-model, model-specific); unknown columns
+    are appended alphabetically."""
     cols = set(columns)
     ordered: List[str] = [c for c in BASE_COLUMNS if c in cols]
+    ordered += [c for c in extra_columns if c in cols and c not in ordered]
+    per_model = per_model_columns(labels)
     for name in MODEL_ORDER:
-        ordered += [f"{name}_{c}" for c in PER_MODEL_COLUMNS if f"{name}_{c}" in cols]
+        ordered += [f"{name}_{c}" for c in per_model if f"{name}_{c}" in cols]
     for name in MODEL_ORDER:
         ordered += [c for c in MODEL_SPECIFIC_COLUMNS[name] if c in cols]
     ordered += sorted(cols - set(ordered))
     return ordered
 
 
-def merge_with_existing(new: pd.DataFrame, path: Path, split: str) -> pd.DataFrame:
+def merge_with_existing(new: pd.DataFrame, path: Path, split: str, labels: Sequence[str] = LABELS,
+                        extra_columns: Sequence[str] = ()) -> pd.DataFrame:
     """Overlay ``new`` on the parquet at ``path``: columns of ``new`` win for the rows it covers, every
     other row/column of the old file is kept. An old file from a *different* split is moved aside
     instead of merged, so validation smoke rows can never leak into test-split results."""
     key = ["dataset_index", "variant"]
     if not path.exists():
-        return new[column_order(new.columns)]
+        return new[column_order(new.columns, labels, extra_columns)]
     old = pd.read_parquet(path)
     old_splits = set(old["split"].dropna().unique().tolist()) if "split" in old.columns else set()
     if old_splits and old_splits != {split}:
         backup = path.with_name(f"{path.stem}.{'_'.join(sorted(old_splits))}.bak{path.suffix}")
         shutil.move(str(path), str(backup))
         log(f"existing {path.name} holds split(s) {sorted(old_splits)} != {split!r}; moved to {backup.name}")
-        return new[column_order(new.columns)]
+        return new[column_order(new.columns, labels, extra_columns)]
 
     old_i = old.set_index(key)
     new_i = new.set_index(key)
@@ -489,7 +547,7 @@ def merge_with_existing(new: pd.DataFrame, path: Path, split: str) -> pd.DataFra
     overlapping = old_i.loc[in_new].drop(columns=[c for c in new_i.columns if c in old_i.columns])
     updated = new_i.join(overlapping, how="left")
     merged = pd.concat([updated, kept_rows]).sort_index().reset_index()
-    return merged[column_order(merged.columns)]
+    return merged[column_order(merged.columns, labels, extra_columns)]
 
 
 # ------------------------------------------------------------------------------------------------
@@ -511,16 +569,16 @@ def latency_stats(values: np.ndarray) -> Dict[str, Optional[float]]:
     }
 
 
-def valid_mask(df: pd.DataFrame, name: str) -> np.ndarray:
+def valid_mask(df: pd.DataFrame, name: str, labels: Sequence[str] = LABELS) -> np.ndarray:
     """Rows where ``name`` produced a usable prediction (no error, pred in range, finite probs)."""
     pred_col, err_col = f"{name}_pred", f"{name}_error"
     if pred_col not in df.columns:
         return np.zeros(len(df), dtype=bool)
     pred = pd.to_numeric(df[pred_col], errors="coerce").to_numpy(dtype=float)
-    ok = np.isfinite(pred) & (pred >= 0) & (pred < len(LABELS))
+    ok = np.isfinite(pred) & (pred >= 0) & (pred < len(labels))
     if err_col in df.columns:
         ok &= df[err_col].isna().to_numpy()
-    probs = df[[f"{name}_p_{label}" for label in LABELS]].to_numpy(dtype=float)
+    probs = df[[f"{name}_p_{label}" for label in labels]].to_numpy(dtype=float)
     ok &= np.all(np.isfinite(probs), axis=1)
     return ok
 
@@ -582,9 +640,32 @@ def append_deviation(path: Path, record: Dict[str, Any], timestamp_utc: str) -> 
         fh.write(text)
 
 
+def laya_temperature_record(run: Optional[ModelRun], n_classes: int) -> Dict[str, Any]:
+    """Laya's shipped temperature bucket / value actually applied to ``n_classes`` options
+    (PROTOCOL_ADDENDUM_v2.md §4). Read from the run's ``LoadInfo`` when Laya was just run, else the
+    bucket name is derived from the option count and the value is unknown (``None``)."""
+    extra = run.load_info.extra if (run is not None and run.load_info is not None) else {}
+    bucket = extra.get("temperature_bucket_applied")
+    if bucket is None:
+        try:
+            from models.laya import temperature_bucket
+
+            bucket = temperature_bucket(n_classes)
+        except Exception:  # noqa: BLE001 - laya not importable: leave unknown
+            bucket = None
+    return {
+        "temperature_bucket_applied": bucket,
+        "temperature_applied": extra.get("temperature_applied"),
+        "temperature_by_options": extra.get("temperature_by_options"),
+    }
+
+
 def summarize_variant(df_v: pd.DataFrame, variant: str, models: Sequence[str], runs: Dict[str, ModelRun],
-                      n_bootstrap: int) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
+                      n_bootstrap: int, labels: Sequence[str] = LABELS) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
     """All §5/§6 numbers for one variant: per-model summaries, pairwise tests, CSV rows.
+
+    ``labels`` are the dataset's label strings in id order (default: the primary six); the class
+    count of every metric is ``len(labels)``.
 
     Headline ``metrics`` (and their bootstrap CIs) and every pairwise test are computed on the rows
     scored by *all* present models (``common``), so per §5 every system is evaluated on identical
@@ -595,13 +676,15 @@ def summarize_variant(df_v: pd.DataFrame, variant: str, models: Sequence[str], r
     """
     per_model: Dict[str, Any] = {}
     csv_rows: List[Dict[str, Any]] = []
+    labels = list(labels)
+    n_classes = len(labels)
     gold = df_v["gold_id"].to_numpy(dtype=np.int64)
     dataset_index = df_v["dataset_index"].to_numpy(dtype=np.int64)
     split = str(df_v["split"].iloc[0]) if "split" in df_v.columns and len(df_v) else None
     n_total = int(len(df_v))
 
     present = [name for name in models if f"{name}_pred" in df_v.columns]
-    masks: Dict[str, np.ndarray] = {name: valid_mask(df_v, name) for name in present}
+    masks: Dict[str, np.ndarray] = {name: valid_mask(df_v, name, labels) for name in present}
     common = common_mask(masks, n_total)
     n_common = int(common.sum())
     deviation = deviation_record(variant, split, masks, common, dataset_index)
@@ -618,6 +701,7 @@ def summarize_variant(df_v: pd.DataFrame, variant: str, models: Sequence[str], r
             "n_total": n_total,
             "n_valid": n_valid,
             "n_common": n_common,
+            "n_classes": n_classes,
             "n_errors": n_errors,
             "n_retries": int(retries.sum()),
             "latency_kind": kind,
@@ -643,19 +727,21 @@ def summarize_variant(df_v: pd.DataFrame, variant: str, models: Sequence[str], r
             entry["api_model_strings"] = [str(m) for m in models_seen]
         else:
             entry["total_cost_usd"] = None
+        if name == "laya":
+            entry["laya_temperature"] = laya_temperature_record(run, n_classes)
 
-        prob_cols = [f"{name}_p_{label}" for label in LABELS]
+        prob_cols = [f"{name}_p_{label}" for label in labels]
         if n_common > 0:
             probs = df_v.loc[common, prob_cols].to_numpy(dtype=float)
             entry["metrics"] = metrics.summarize_model(gold[common], probs, dataset_index[common],
-                                                       n_bootstrap=n_bootstrap, seed=SEED)
+                                                       n_bootstrap=n_bootstrap, seed=SEED, label_names=labels)
         else:
             entry["metrics"] = None
         entry["metrics_rows"] = "common" if n_common > 0 else None
         if n_valid > n_common:
             probs_own = df_v.loc[mask, prob_cols].to_numpy(dtype=float)
             entry["metrics_own_rows"] = metrics.summarize_model(gold[mask], probs_own, dataset_index[mask],
-                                                                n_bootstrap=n_bootstrap, seed=SEED)
+                                                                n_bootstrap=n_bootstrap, seed=SEED, label_names=labels)
         else:
             entry["metrics_own_rows"] = None
         per_model[name] = entry
@@ -671,7 +757,9 @@ def summarize_variant(df_v: pd.DataFrame, variant: str, models: Sequence[str], r
                 "n": n_total,
                 "n_valid": n_valid,
                 "n_common": n_common,
+                "n_classes": n_classes,
                 "accuracy": m.get("accuracy"),
+                "majority_class_accuracy": m.get("majority_class_accuracy"),
                 "acc_ci_lo": (m.get("accuracy_ci") or {}).get("low"),
                 "acc_ci_hi": (m.get("accuracy_ci") or {}).get("high"),
                 "macro_f1": m.get("macro_f1"),
@@ -709,7 +797,8 @@ def summarize_variant(df_v: pd.DataFrame, variant: str, models: Sequence[str], r
         pred_a = pd.to_numeric(df_v[f"{a}_pred"], errors="coerce").to_numpy(dtype=float)[common].astype(np.int64)
         pred_b = pd.to_numeric(df_v[f"{b}_pred"], errors="coerce").to_numpy(dtype=float)[common].astype(np.int64)
         try:
-            result = metrics.compare_models(gold[common], pred_a, pred_b, n_bootstrap=n_bootstrap, seed=SEED)
+            result = metrics.compare_models(gold[common], pred_a, pred_b, n_bootstrap=n_bootstrap, seed=SEED,
+                                            n_classes=n_classes)
         except Exception as exc:  # noqa: BLE001 - a failed test must not abort the run
             result = {"error": f"{type(exc).__name__}: {exc}"}
         result["n"] = n_common
@@ -722,6 +811,8 @@ def summarize_variant(df_v: pd.DataFrame, variant: str, models: Sequence[str], r
         "pairwise": pairwise,
         "n_total": n_total,
         "n_common": n_common,
+        "n_classes": n_classes,
+        "majority_class_accuracy": metrics.majority_class_accuracy(gold[common], n_classes) if n_common > 0 else None,
         "metrics_rows": "rows with a usable prediction from every present model",
         "deviation": deviation,
     }, csv_rows
@@ -732,14 +823,39 @@ def summarize_variant(df_v: pd.DataFrame, variant: str, models: Sequence[str], r
 # ------------------------------------------------------------------------------------------------
 
 
+def dataset_env(spec: DatasetSpec, split_name: str, is_eval: bool, n_rows: int) -> Dict[str, Any]:
+    """Full dataset record for env.json / summary.json: the spec (source, revision, labels, instruction,
+    template, ...) plus what this run evaluated. Keeps the legacy ``id``/``config``/``revision``/
+    ``warmup_split``/``warmup_rows`` keys of the primary run."""
+    record = spec.to_dict()
+    record.update(
+        {
+            "id": spec.source_id,
+            "config": DATASET_CONFIG if spec.key == EMOTION.key else None,
+            "split_evaluated": split_name,
+            "is_eval_split": is_eval,
+            "n_rows": n_rows,
+            "warmup_split": spec.smoke_split_name,
+            "warmup_rows": WARMUP_N,
+        }
+    )
+    return record
+
+
 def build_env(args: argparse.Namespace, runs: Dict[str, ModelRun], seed_info: Dict[str, Any],
-              n_rows: int, started_utc: str) -> Dict[str, Any]:
+              n_rows: int, started_utc: str, spec: DatasetSpec = EMOTION,
+              split_name: Optional[str] = None, is_eval: Optional[bool] = None) -> Dict[str, Any]:
     load_infos = {name: run.load_info.to_dict() for name, run in runs.items() if run.load_info is not None}
+    if split_name is None or is_eval is None:
+        is_eval, split_name = resolve_split(spec, args.split)
     return {
         "timestamp_utc": started_utc,
         "finished_utc": datetime.now(timezone.utc).isoformat(),
         "argv": sys.argv,
-        "split": args.split,
+        "dataset_key": spec.key,
+        "split": split_name,
+        "split_arg": args.split,
+        "is_eval_split": is_eval,
         "limit": args.limit,
         "n_rows": n_rows,
         "models": list(runs),
@@ -748,8 +864,7 @@ def build_env(args: argparse.Namespace, runs: Dict[str, ModelRun], seed_info: Di
         "python_executable": sys.executable,
         "packages": {p: package_version(p) for p in PACKAGES_FOR_ENV},
         "hardware": hardware_info(),
-        "dataset": {"id": DATASET_ID, "config": DATASET_CONFIG, "revision": DATASET_REVISION,
-                    "warmup_split": "validation", "warmup_rows": WARMUP_N},
+        "dataset": dataset_env(spec, split_name, is_eval, n_rows),
         "model_revisions": {"jev": JEV_MODEL_ID, "prismnli": PRISMNLI_REVISION, "laya": LAYA_REVISION},
         "seeds": seed_info,
         "per_model": {
@@ -774,22 +889,41 @@ def build_env(args: argparse.Namespace, runs: Dict[str, ModelRun], seed_info: Di
 
 
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run the frozen emotion-classification benchmark (PROTOCOL.md).")
-    parser.add_argument("--split", choices=SPLITS, default="validation",
-                        help="dataset split to score; 'test' is the real run, 'validation' is for smoke tests")
+    parser = argparse.ArgumentParser(
+        description="Run the frozen zero-shot classification benchmark (PROTOCOL.md + PROTOCOL_ADDENDUM_v2.md).")
+    parser.add_argument("--dataset", choices=DATASET_KEYS, default=EMOTION.key,
+                        help="dataset key from datasets_registry (default: emotion, the primary benchmark)")
+    parser.add_argument("--split", choices=SPLIT_CHOICES, default="smoke",
+                        help="'eval' scores the dataset's evaluated split (the real run), 'smoke' its smoke rows; "
+                             "'test'/'validation' are the legacy spellings of eval/smoke accepted for "
+                             "--dataset emotion only (rejected for every other dataset)")
+    parser.add_argument("--smoke", action="store_true", help="shorthand for --split smoke")
     parser.add_argument("--limit", type=int, default=None, help="score only the first N rows of the split")
     parser.add_argument("--models", type=lambda v: parse_csv_list(v, MODEL_ORDER, "model"),
                         default=list(MODEL_ORDER), help="comma-separated subset of jev,prismnli,laya")
     parser.add_argument("--variants", type=lambda v: parse_csv_list(v, VARIANTS, "variant"),
                         default=["plain"], help="comma-separated subset of plain,defined")
     parser.add_argument("--skip-plots", action="store_true", help="do not render figures")
-    parser.add_argument("--out-dir", type=Path, default=RESULTS_DIR,
-                        help="where raw_predictions.parquet, summary.*, env.json and plots/ are written")
+    parser.add_argument("--out-dir", type=Path, default=None,
+                        help="where raw_predictions.parquet, summary.*, env.json and plots/ are written "
+                             "(default: results/ for emotion, results/<dataset>/ otherwise; smoke runs use a "
+                             "smoke_<split>/ sub-directory)")
     parser.add_argument("--n-bootstrap", type=int, default=metrics.BOOTSTRAP_N,
                         help="bootstrap resamples (protocol value 10000; lower only for quick checks)")
     args = parser.parse_args(argv)
     if args.limit is not None and args.limit <= 0:
         parser.error("--limit must be positive")
+    if args.smoke:
+        args.split = "smoke"
+    spec = get_spec(args.dataset)
+    try:
+        resolve_split(spec, args.split)
+    except ValueError as exc:
+        parser.error(str(exc))
+    unsupported = [v for v in args.variants if v not in spec.variants]
+    if unsupported:
+        parser.error(f"variant(s) {unsupported} are not available for dataset {spec.key!r} "
+                     f"(no label definitions; PROTOCOL_ADDENDUM_v2.md §3)")
     return args
 
 
@@ -797,28 +931,33 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     args = parse_args(argv)
     started_utc = datetime.now(timezone.utc).isoformat()
     seed_info = seed_everything(SEED)
-    out_dir: Path = args.out_dir
+    spec = get_spec(args.dataset)
+    is_eval, split_name = resolve_split(spec, args.split)
+    out_dir: Path = args.out_dir if args.out_dir is not None else default_out_dir(spec, is_eval)
     out_dir.mkdir(parents=True, exist_ok=True)
+    cache_dir = jev_cache_dir(spec, is_eval)
+    labels = list(spec.labels)
     models: List[str] = [m for m in MODEL_ORDER if m in args.models]
     variants: List[str] = [v for v in VARIANTS if v in args.variants]
 
-    log(f"split={args.split} limit={args.limit} models={models} variants={variants} out_dir={out_dir}")
-    rows = load_split(args.split, args.limit)
-    warm_texts = load_split("validation", WARMUP_N)["text"].tolist()
-    log(f"loaded {len(rows)} rows of {args.split!r} (revision {DATASET_REVISION[:8]}); "
-        f"{len(warm_texts)} validation warm-up texts")
+    log(f"dataset={spec.key} ({spec.source_id} @ {spec.revision[:8]}) split={split_name} "
+        f"({'EVAL' if is_eval else 'smoke'}) limit={args.limit} models={models} variants={variants} "
+        f"n_classes={spec.n_classes} out_dir={out_dir} jev_cache={cache_dir}")
+    rows = spec.load_eval(args.limit) if is_eval else spec.load_smoke(args.limit)
+    warm_texts = spec.load_smoke(WARMUP_N)["text"].tolist()
+    log(f"loaded {len(rows)} rows of {split_name!r}; {len(warm_texts)} {spec.smoke_split_name!r} warm-up texts")
 
     runs: Dict[str, ModelRun] = {}
     for name in models:
-        runs[name] = run_model(name, rows, warm_texts, variants, args.split)
+        runs[name] = run_model(name, rows, warm_texts, variants, split_name, spec, cache_dir)
 
-    new_frame = assemble_frame(rows, args.split, list(runs.values()), variants)
+    new_frame = assemble_frame(rows, split_name, list(runs.values()), variants, labels)
     parquet_path = out_dir / "raw_predictions.parquet"
-    df = merge_with_existing(new_frame, parquet_path, args.split)
+    df = merge_with_existing(new_frame, parquet_path, split_name, labels, spec.extra_columns)
     df.to_parquet(parquet_path, index=False)
     log(f"wrote {parquet_path} ({len(df)} rows x {len(df.columns)} columns)")
 
-    env = build_env(args, runs, seed_info, len(rows), started_utc)
+    env = build_env(args, runs, seed_info, len(rows), started_utc, spec, split_name, is_eval)
     (out_dir / "env.json").write_text(json.dumps(json_safe(env), indent=2))
     log(f"wrote {out_dir / 'env.json'}")
 
@@ -826,9 +965,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     present_models = [m for m in MODEL_ORDER if f"{m}_pred" in df.columns]
     present_variants = [v for v in VARIANTS if (df["variant"] == v).any()]
     summary: Dict[str, Any] = {
-        "protocol": "PROTOCOL.md v1 (frozen 2026-09-20)",
+        "protocol": "PROTOCOL.md v1 (frozen 2026-09-20)" + ("" if spec.key == EMOTION.key else
+                                                            " + PROTOCOL_ADDENDUM_v2.md (frozen 2026-09-20)"),
         "timestamp_utc": started_utc,
-        "split": args.split,
+        "dataset": dataset_env(spec, split_name, is_eval, len(rows)),
+        "split": split_name,
+        "is_eval_split": is_eval,
+        "n_classes": spec.n_classes,
         "n_rows": int(df["dataset_index"].nunique()),
         "models": present_models,
         "variants": present_variants,
@@ -841,20 +984,25 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     csv_rows: List[Dict[str, Any]] = []
     for variant in present_variants:
         df_v = df[df["variant"] == variant].sort_values("dataset_index").reset_index(drop=True)
-        per_variant, rows_v = summarize_variant(df_v, variant, present_models, runs, args.n_bootstrap)
+        per_variant, rows_v = summarize_variant(df_v, variant, present_models, runs, args.n_bootstrap, labels)
         summary["per_variant"][variant] = per_variant
         csv_rows += rows_v
         for name, entry in per_variant["models"].items():
             m = entry["metrics"] or {}
             log(f"{variant:8s} {DISPLAY_NAMES[name]:14s} n_valid={entry['n_valid']:5d} "
                 f"n_common={entry['n_common']:5d} errors={entry['n_errors']} "
-                f"acc={m.get('accuracy', float('nan')):.4f} macroF1={m.get('macro_f1', float('nan')):.4f} "
+                f"acc={m.get('accuracy', float('nan')):.4f} (majority {m.get('majority_class_accuracy', float('nan')):.4f}) "
+                f"macroF1={m.get('macro_f1', float('nan')):.4f} "
                 f"ece15={m.get('ece_15', float('nan')):.4f} p50={entry['latency']['p50_ms']}")
+            if name == "laya":
+                t = entry.get("laya_temperature") or {}
+                log(f"{variant:8s} Laya temperature bucket applied: {t.get('temperature_bucket_applied')} "
+                    f"= {t.get('temperature_applied')} ({spec.n_classes} options)")
         deviation = per_variant["deviation"]
         if deviation is not None:
             log(f"DEVIATION (§5): variant={variant} metrics computed on {deviation['n_common']}/"
                 f"{deviation['n_total']} common rows; excluded dataset_index={deviation['excluded_dataset_index']}")
-            if args.split == "test":
+            if is_eval:
                 dev_path = out_dir / "deviations.md"
                 append_deviation(dev_path, deviation, started_utc)
                 log(f"appended deviation to {dev_path}; rerun to re-request the failed rows")
@@ -876,7 +1024,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             df_v = df[df["variant"] == variant]
             if per_variant["deviation"] is not None:  # plot the same common rows as the metrics
                 df_v = df_v[~df_v["dataset_index"].isin(per_variant["deviation"]["excluded_dataset_index"])]
-            written = plots.make_all_plots(df_v, summaries, None, plot_dir, model_prefixes=prefixes, variant=variant)
+            written = plots.make_all_plots(df_v, summaries, None, plot_dir, model_prefixes=prefixes, variant=variant,
+                                           labels=labels)
             log(f"wrote {len(written)} figure files to {plot_dir}")
 
     total_errors = sum(e["n_errors"] for v in summary["per_variant"].values() for e in v["models"].values())

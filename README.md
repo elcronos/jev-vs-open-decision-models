@@ -66,6 +66,33 @@ and documented; the report treats PrismNLI's lead as partly non-zero-shot for th
 follow-up on an emotion dataset absent from the `zeroshot-v2.0` list (the list covers 28 public
 classification sets, so candidates are scarce) is the clean next step.
 
+### Dataset constraints (follow-up datasets, `PROTOCOL_ADDENDUM_v2.md` §6)
+
+Three follow-up datasets were chosen because they are **absent from every disclosed training list**
+of the three systems. The evidence base is the same as Section 5 of `REPORT.md`
+(`results/contamination_research.json`): the pinned training CSV of
+`MoritzLaurer/deberta-v3-large-zeroshot-v2.0` (the checkpoint PrismNLI-0.4B is initialised from;
+the non-`-c` model was trained on every row with `used_in_v1.1 == TRUE`), the PrismNLI synthetic
+data seeds (WANLI only, per the dataset card and the paper), Laya's disclosed training mix (model
+card table plus the `in_training` flags hard-coded in its public eval harness
+`research/scripts/bench_apps.py`), and TypeSafe's statements about Jev's corpus (self-made,
+undisclosed). "Absent from disclosed lists" is the strongest statement available; it is not
+"never seen".
+
+| dataset (pinned) | evaluated split, n, classes | `deberta-v3-large-zeroshot-v2.0` training CSV (PrismNLI lineage) | PrismNLI synthetic seeds (WANLI) | Laya disclosed training mix / eval harness | Jev (TypeSafe) corpus | verdict |
+|---|---|---|---|---|---|---|
+| `cardiffnlp/tweet_topic_single` @ `87b7a0d1` | `test_2021`, 1693, 6 | not in the CSV. The sister set `tweet_topic_multi` is listed with `used_in_v1.0/v1.1 = FALSE`, `future_use = excluded` ("multi-label"); the single-label set does not appear at all | WANLI is MNLI-style premise/hypothesis pairs, no tweet-topic data; "tweet"/"topic" absent from the PrismNLI card and paper | not in the model-card table (AG News, BoolQ in mix; DAIR Emotion, SST-5, prompt-injections held out) and not loaded by `bench_apps.py` / `build_benchmark_nb.py`; the dev.to description names intents, NLI, safety, email triage, no tweet topics | training data "made ourselves", no corpus or benchmark named; no public-benchmark policy | absent from all disclosed lists |
+| `zeroshot/twitter-financial-news-topic` @ `acbc8af2` | `validation`, 4117, 20 | listed as `twitter_financial_news_topic` with `used_in_v1.0/v1.1 = FALSE`, `future_use = excluded` ("data source and task definition too unclear"); i.e. explicitly **not** trained on (only the sibling `financial_phrasebank` sentiment set is `TRUE`) | not a seed | not in the model-card table; not loaded by the eval harness; no financial-news topic source disclosed | as above | absent from all disclosed lists; explicitly excluded by the zeroshot-v2.0 authors |
+| `OpenRL/daily_dialog` @ `1668faf0` (mirror of `li2017dailydialog/daily_dialog`) | `test` flattened to utterances, 7740, 7 | listed as `daily_dialog` with `used_in_v1.0/v1.1 = FALSE`, `future_use = later`; i.e. not in the released model's training set (the emotion sets that **are** `TRUE` are `dair-ai/emotion` and `emo`/EmoContext) | not a seed | not in the model-card table; not loaded by the eval harness. Caveat: Laya's `eval/results.md` shows a trained "emotion and tone" task family (1,825 in-task questions) whose sources are not named, so a dialogue-emotion set cannot be ruled out from the disclosures | as above | absent from all disclosed lists; residual risk through Laya's unnamed emotion family |
+
+Additional per-dataset caveats: `fin_topic` has no test split, so `validation` is used purely as an
+evaluation set (never for tuning); its 20 options fall in Laya's `choice:11+` temperature bucket
+(0.1006, shipped, applied as-is and recorded in `summary.json` / `env.json`), whereas the 6/7-class
+sets use `choice:6-10` (1.00002). `daily_dialog` is 82% `no emotion`, so macro-F1 and per-class
+results carry the information there and the majority-class accuracy is reported next to every
+accuracy. `tweet_topic`'s loading script is no longer runnable under `datasets` 5, so the raw
+`split_temporal/test_2021.single.json` file is read at the pinned revision via `hf_hub_download`.
+
 ### Why not an existing Jev benchmark (JevBench, jev-benchmarks, decision-model-benchmark)?
 
 Several community benchmarks for Jev-class models appeared in the days around Jev 1.13's release.
@@ -89,21 +116,24 @@ tests, and no composite score.
 
 ```
 PROTOCOL.md                 frozen protocol (read this first)
+PROTOCOL_ADDENDUM_v2.md     frozen addendum: three follow-up datasets (tweet_topic, fin_topic, daily_dialog)
 REPORT.md                   final report (all numbers, methodology, contamination review, figures)
-benchmark.py                end-to-end driver: data -> models -> parquet -> metrics -> plots
-metrics.py                  PROTOCOL §5 metrics (accuracy, macro-F1, NLL, Brier, ECE, selective, bootstrap, McNemar)
-plots.py                    PROTOCOL §7 figures (PNG 200 dpi + PDF)
+benchmark.py                end-to-end driver: data -> models -> parquet -> metrics -> plots (--dataset selects the registry entry)
+datasets_registry.py        DatasetSpec registry: source/revision, evaluated split, labels, instruction, hypothesis template, smoke rows
+metrics.py                  PROTOCOL §5 metrics for any class count (accuracy, majority-class accuracy, macro-F1, NLL, Brier, ECE, selective, bootstrap, McNemar)
+plots.py                    PROTOCOL §7 figures (PNG 200 dpi + PDF); scale to 7 and 20 classes
 render_plots.py             re-render every figure from results/summary.json + parquet (no model calls)
 supplementary_analysis.py   post-hoc analyses from the frozen predictions -> results/supplementary.json (no model calls)
 inspect_sample.py           deterministic 22-row qualitative sample -> results/inspection_sample.{md,json} (no model calls)
 jev_sequential_latency.py   Jev latency at concurrency 1 on validation rows -> results/jev_sequential_latency.json
-models/common.py            LABELS, INSTRUCTION, DEFINITIONS, revisions, Prediction / LoadInfo / Backend
-models/jev.py               OpenRouter Decisions API adapter (threaded, cached, retrying)
-models/laya.py              Laya local adapter
-models/prismnli.py          PrismNLI-0.4B zero-shot NLI adapter (+ HF pipeline equivalence check)
-tests/                      unit tests (metrics.py, benchmark.py merge logic, Jev adapter)
+models/common.py            LABELS, INSTRUCTION, DEFINITIONS, revisions, Prediction / LoadInfo / Backend (primary benchmark)
+models/jev.py               OpenRouter Decisions API adapter (threaded, cached, retrying); takes a DatasetSpec
+models/laya.py              Laya local adapter; takes a DatasetSpec, records the temperature bucket applied
+models/prismnli.py          PrismNLI-0.4B zero-shot NLI adapter (+ HF pipeline equivalence check); takes a DatasetSpec
+tests/                      unit tests (metrics for 6/7/20 classes, registry strings and counts, benchmark merge logic,
+                            Jev adapter, plots, and a regression test against results/frozen_primary_plain/)
 requirements.txt            pinned package versions
-results/                    all outputs (see below)
+results/                    primary emotion outputs (see below); results/<dataset>/ for the follow-up datasets
 ```
 
 ## Setup
@@ -128,16 +158,16 @@ downloaded once into the Hugging Face cache at their pinned revisions.
 python benchmark.py --split validation --limit 8 --models jev,prismnli,laya --variants plain,defined
 ```
 
-Smoke tests use only the first 8 rows of the **validation** split, per PROTOCOL §2. The Jev
-responses for validation rows are cached under `results/cache/smoke_validation/`, never in the
-production cache. Per-module smoke tests also exist:
+Smoke tests use only the first 8 rows of the **validation** split, per PROTOCOL §2, and write to
+`results/smoke_validation/`. The Jev responses for validation rows are cached under
+`results/cache/smoke_validation/`, never in the production cache. Per-module smoke tests also exist:
 
 ```bash
 python -m models.jev --smoke          # also verifies cache resume (second pass makes 0 HTTP calls)
 python -m models.prismnli --smoke     # also writes results/prismnli_pipeline_check.json
 python -m models.laya --smoke
 python plots.py                       # synthetic self-test of every figure
-pytest -q tests/                      # metrics unit tests
+pytest -q tests/                      # unit + regression tests (frozen primary numbers must be reproduced to 1e-9)
 ```
 
 ### Full test run
@@ -156,9 +186,33 @@ cached in `results/cache/jev_<variant>.jsonl` keyed by `dataset_index`, so an in
 resumes without re-paying for completed rows. An existing parquet from a *different* split is
 moved aside (`raw_predictions.<split>.bak.parquet`) rather than merged.
 
-Flags: `--split {validation,test}`, `--limit N`, `--models jev,prismnli,laya`,
-`--variants plain,defined`, `--skip-plots`, `--out-dir DIR`, `--n-bootstrap N`
-(protocol value 10000; lower it only for quick checks).
+Flags: `--dataset {emotion,tweet_topic,fin_topic,daily_dialog}` (default `emotion`),
+`--split {eval,smoke,validation,test}` (`eval` = the dataset's evaluated split, `smoke` = its
+smoke rows; `test`/`validation` are the legacy spellings accepted for `--dataset emotion` only and
+rejected for every other dataset, so `validation` can never select `fin_topic`'s evaluated split),
+`--smoke`, `--limit N`,
+`--models jev,prismnli,laya`, `--variants plain,defined`, `--skip-plots`, `--out-dir DIR`,
+`--n-bootstrap N` (protocol value 10000; lower it only for quick checks).
+
+### Follow-up datasets (`PROTOCOL_ADDENDUM_v2.md`)
+
+```bash
+# smoke: the addendum's smoke rows only (never the evaluated split), outputs under results/<key>/smoke_<split>/
+for d in tweet_topic fin_topic daily_dialog; do
+  python benchmark.py --dataset $d --split smoke --limit 8 --models jev,prismnli,laya --variants plain
+done
+# full evaluated split, outputs under results/<key>/ (Jev cache results/<key>/cache/jev_plain.jsonl)
+python benchmark.py --dataset tweet_topic --split eval --models jev,prismnli,laya --variants plain
+python benchmark.py --dataset fin_topic   --split eval --models jev,prismnli,laya --variants plain
+python benchmark.py --dataset daily_dialog --split eval --models jev,prismnli,laya --variants plain
+```
+
+Only `plain` exists for these datasets (no definitions were written; `--variants defined` is
+rejected). Each dataset's labels, instruction, hypothesis template, pinned revision and smoke rows
+live in `datasets_registry.py`; `env.json` and `summary.json` record the full spec. The `emotion`
+entry reproduces the primary run byte-for-byte (same prompts, same `results/` layout). Smoke runs of
+any dataset, including `emotion`, are written to a `smoke_<split>/` sub-directory
+(`results/smoke_validation/`) so the frozen evaluation files are never overwritten.
 
 ### Post-run analyses (no model calls except where noted)
 
@@ -188,6 +242,8 @@ shasum -a 256 -c results/frozen_primary_plain/SHA256SUMS      # verify the froze
 | `contamination_research.json` | verbatim, re-fetched quotes from model cards, training notebooks and press for each system's exposure to `dair-ai/emotion` (REPORT.md Section 5) |
 | `run_plain.log` / `run_defined.log` | console logs of the two test-split invocations |
 | `cache/` | Jev response caches (test split: `jev_plain.jsonl`, `jev_defined.jsonl`) and `cache/smoke_validation/`, `cache/seq_latency_validation/` (validation rows only) |
+| `<dataset>/` (`tweet_topic/`, `fin_topic/`, `daily_dialog/`) | the same file set (`raw_predictions.parquet`, `summary.json`, `summary.csv`, `env.json`, `plots/`, `cache/`) for each follow-up dataset of `PROTOCOL_ADDENDUM_v2.md`; `summary.*` additionally carry `n_classes` and `majority_class_accuracy`, and `env.json`/`summary.json` embed the full `DatasetSpec` (source, revision, split, labels, instruction, template) plus Laya's applied temperature bucket |
+| `smoke_validation/`, `<dataset>/smoke_<split>/` | outputs of smoke runs (never the evaluated split) |
 
 Rows on which a model failed (after all retries) carry `{model}_error`, `pred = -1` and NaN
 probabilities and are counted in `n_errors`. Per PROTOCOL.md §5 all headline metrics, CIs and pairwise tests of a variant are computed on the rows every model scored (`n_common`); any shortfall is recorded under `deviation` in `summary.json` and, on the test split, appended to `results/deviations.md`.

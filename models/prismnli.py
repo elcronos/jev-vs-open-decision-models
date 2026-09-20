@@ -1,9 +1,13 @@
 """PrismNLI-0.4B zero-shot NLI backend (PROTOCOL.md §3.3).
 
-Each example is scored with six (premise, hypothesis) pairs in a single forward pass. The
-primary categorical distribution follows the HF ``zero-shot-classification`` pipeline with
-``multi_label=False``: a softmax over the six *entailment* logits. Two secondary conversions
+Each example is scored with one (premise, hypothesis) pair per label of the dataset, all in a
+single forward pass (batch = number of labels: 6 for the primary benchmark, 20 for ``fin_topic``).
+The primary categorical distribution follows the HF ``zero-shot-classification`` pipeline with
+``multi_label=False``: a softmax over the per-label *entailment* logits. Two secondary conversions
 are stored in ``Prediction.extra`` to quantify the effect of that choice.
+
+The dataset is a ``datasets_registry.DatasetSpec`` passed at construction (default: the emotion
+spec); hypotheses are ``spec.hypothesis_template.format(label=label)`` verbatim.
 
 Run ``python -m models.prismnli --smoke`` from the project root for the 8-row validation smoke
 test plus the pipeline equivalence check required by the protocol.
@@ -21,11 +25,11 @@ import torch
 from huggingface_hub import snapshot_download
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
+from datasets_registry import EMOTION, DatasetSpec
 from models.common import (
     DATASET_CONFIG,
     DATASET_ID,
     DATASET_REVISION,
-    DEFINITIONS,
     LABELS,
     PRISMNLI_REPO,
     PRISMNLI_REVISION,
@@ -40,8 +44,9 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 RESULTS_DIR = PROJECT_ROOT / "results"
 PIPELINE_CHECK_PATH = RESULTS_DIR / "prismnli_pipeline_check.json"
 
-HYPOTHESIS_TEMPLATE_PLAIN = "The primary emotion expressed in this text is {label}."
-HYPOTHESIS_TEMPLATE_DEFINED = "The primary emotion expressed in this text is {label} ({definition})."
+# Primary-benchmark templates (PROTOCOL.md §3.3 / §4); other datasets carry their own in the spec.
+HYPOTHESIS_TEMPLATE_PLAIN = EMOTION.hypothesis_template
+HYPOTHESIS_TEMPLATE_DEFINED = EMOTION.hypothesis_template_defined
 # The HF pipeline formats its template positionally (``template.format(label)``).
 PIPELINE_TEMPLATE = HYPOTHESIS_TEMPLATE_PLAIN.replace("{label}", "{}")
 MAX_LENGTH = 512
@@ -66,21 +71,28 @@ def _synchronize(device: str) -> None:
         torch.cuda.synchronize()
 
 
-def hypothesis_for(label: str, variant: str) -> str:
-    """Render the frozen hypothesis for one label under ``variant`` ('plain' or 'defined')."""
-    if variant == "plain":
-        return HYPOTHESIS_TEMPLATE_PLAIN.format(label=label)
-    if variant == "defined":
-        return HYPOTHESIS_TEMPLATE_DEFINED.format(label=label, definition=DEFINITIONS[label])
-    raise ValueError(f"unknown variant {variant!r}; expected one of {VARIANTS}")
+def hypothesis_for(label: str, variant: str, spec: DatasetSpec = EMOTION) -> str:
+    """Render the frozen hypothesis for one label under ``variant`` ('plain' or 'defined').
+
+    ``spec.hypothesis_template.format(label=label)`` verbatim; ``defined`` raises ``ValueError`` for
+    datasets without definitions.
+    """
+    return spec.hypothesis(label, variant)
 
 
-def pipeline_candidate_label(label: str, variant: str) -> str:
+def pipeline_template(spec: DatasetSpec = EMOTION) -> str:
+    """The spec's plain template in the HF pipeline's positional form."""
+    return spec.hypothesis_template.replace("{label}", "{}")
+
+
+def pipeline_candidate_label(label: str, variant: str, spec: DatasetSpec = EMOTION) -> str:
     """The string handed to the HF pipeline as a candidate label so that
-    ``PIPELINE_TEMPLATE.format(candidate)`` reproduces :func:`hypothesis_for`."""
+    ``pipeline_template(spec).format(candidate)`` reproduces :func:`hypothesis_for`."""
+    spec.check_variant(variant)
     if variant == "plain":
         return label
-    return f"{label} ({DEFINITIONS[label]})"
+    assert spec.definitions is not None
+    return f"{label} ({spec.definitions[label]})"
 
 
 class PrismNLIBackend:
@@ -88,7 +100,8 @@ class PrismNLIBackend:
 
     name: str = "prismnli"
 
-    def __init__(self, device: Optional[str] = None) -> None:
+    def __init__(self, device: Optional[str] = None, spec: DatasetSpec = EMOTION) -> None:
+        self.spec = spec
         self.device: str = device or pick_device()
         self.dtype: torch.dtype = torch.float32
         self.revision: str = PRISMNLI_REVISION
@@ -140,6 +153,9 @@ class PrismNLIBackend:
                 ).get("torch_dtype"),
                 "max_length": MAX_LENGTH,
                 "batch_size": 1,
+                "dataset": self.spec.key,
+                "n_hypotheses_per_forward": self.spec.n_classes,
+                "hypothesis_template": self.spec.hypothesis_template,
             },
         )
 
@@ -150,10 +166,10 @@ class PrismNLIBackend:
     # ---------------------------------------------------------------- inference
     @torch.inference_mode()
     def _forward(self, text: str, variant: str) -> torch.Tensor:
-        """Tokenise the six pairs for ``text`` and return raw logits of shape (6, num_labels)."""
-        hypotheses = [hypothesis_for(label, variant) for label in LABELS]
+        """Tokenise one pair per label for ``text`` and return raw logits of shape (n_labels, num_labels)."""
+        hypotheses = self.spec.hypotheses(variant)
         enc = self.tokenizer(
-            [text] * len(LABELS),
+            [text] * len(hypotheses),
             hypotheses,
             truncation="only_first",
             max_length=MAX_LENGTH,
@@ -182,7 +198,7 @@ class PrismNLIBackend:
         except Exception as exc:  # noqa: BLE001 - surfaced as Prediction.error per protocol
             return Prediction(
                 dataset_index=dataset_index,
-                probs=[float("nan")] * len(LABELS),
+                probs=[float("nan")] * self.spec.n_classes,
                 pred=-1,
                 confidence=float("nan"),
                 latency_ms=float("nan"),
@@ -229,7 +245,7 @@ class PrismNLIBackend:
     ) -> Dict[str, Any]:
         """Compare primary probs with ``transformers.pipeline('zero-shot-classification')``.
 
-        The pipeline is given a single template and the six candidate labels (for the
+        The pipeline is given the spec's single template and its candidate labels (for the
         ``defined`` variant the candidate is ``"label (definition)"`` so the rendered
         hypothesis is identical). Pipeline output is ordered by score, so it is aligned back
         to canonical order by label name. Writes the JSON report to ``out_path``.
@@ -237,6 +253,8 @@ class PrismNLIBackend:
         from transformers import pipeline as hf_pipeline
 
         self._require_loaded()
+        labels = self.spec.labels
+        template = pipeline_template(self.spec)
         device_arg: Any = self.device if self.device != "cpu" else -1
         zs = hf_pipeline(
             "zero-shot-classification",
@@ -248,8 +266,8 @@ class PrismNLIBackend:
         per_row: List[Dict[str, Any]] = []
         overall_max = 0.0
         for variant in variants:
-            candidates = [pipeline_candidate_label(l, variant) for l in LABELS]
-            cand2label = dict(zip(candidates, LABELS))
+            candidates = [pipeline_candidate_label(l, variant, self.spec) for l in labels]
+            cand2label = dict(zip(candidates, labels))
             for idx, text in rows:
                 ours = self.predict_one(idx, text, variant)
                 if ours.error is not None:
@@ -257,12 +275,12 @@ class PrismNLIBackend:
                 out = zs(
                     text,
                     candidate_labels=candidates,
-                    hypothesis_template=PIPELINE_TEMPLATE,
+                    hypothesis_template=template,
                     multi_label=False,
                 )
-                pipe_probs = [0.0] * len(LABELS)
+                pipe_probs = [0.0] * len(labels)
                 for cand, score in zip(out["labels"], out["scores"]):
-                    pipe_probs[LABELS.index(cand2label[cand])] = float(score)
+                    pipe_probs[labels.index(cand2label[cand])] = float(score)
                 diffs = [abs(a - b) for a, b in zip(ours.probs, pipe_probs)]
                 row_max = max(diffs)
                 overall_max = max(overall_max, row_max)
@@ -281,8 +299,9 @@ class PrismNLIBackend:
             "revision": self.revision,
             "device": self.device,
             "dtype": str(self.dtype).replace("torch.", ""),
-            "hypothesis_template": HYPOTHESIS_TEMPLATE_PLAIN,
-            "pipeline_template": PIPELINE_TEMPLATE,
+            "dataset": self.spec.key,
+            "hypothesis_template": self.spec.hypothesis_template,
+            "pipeline_template": template,
             "variants": list(variants),
             "n_rows": len(rows),
             "tolerance": PIPELINE_TOLERANCE,
