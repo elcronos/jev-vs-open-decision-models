@@ -1,0 +1,50 @@
+{
+ "emotion": {
+  "majority_class": 0.3475,
+  "acc_jev": 0.5865,
+  "acc_prismnli": 0.7245,
+  "acc_laya": 0.587,
+  "acc_majority_vote": 0.666,
+  "acc_prob_avg": 0.674,
+  "acc_oracle_any": 0.8055,
+  "balanced_acc_jev": 0.4965869395631719,
+  "balanced_acc_prismnli": 0.6640242344729508,
+  "balanced_acc_laya": 0.4761891319011111
+ },
+ "tweet_topic": {
+  "majority_class": 0.3963378617838157,
+  "acc_jev": 0.7932663910218547,
+  "acc_prismnli": 0.6326048434731246,
+  "acc_laya": 0.6320141760189013,
+  "acc_majority_vote": 0.7377436503248671,
+  "acc_prob_avg": 0.7442409923213231,
+  "acc_oracle_any": 0.8712344949793266,
+  "balanced_acc_jev": 0.7482342117403823,
+  "balanced_acc_prismnli": 0.6592649307041921,
+  "balanced_acc_laya": 0.5341627330955476
+ },
+ "fin_topic": {
+  "majority_class": 0.2069468059266456,
+  "acc_jev": 0.669905270828273,
+  "acc_prismnli": 0.3524410978868108,
+  "acc_laya": 0.3419965994656303,
+  "acc_majority_vote": 0.5353412679135293,
+  "acc_prob_avg": 0.547971824143794,
+  "acc_oracle_any": 0.7558902113189215,
+  "balanced_acc_jev": 0.7328998279892394,
+  "balanced_acc_prismnli": 0.28903358180018723,
+  "balanced_acc_laya": 0.44001256925793786
+ },
+ "daily_dialog": {
+  "majority_class": 0.8166666666666667,
+  "acc_jev": 0.7099483204134367,
+  "acc_prismnli": 0.7652454780361757,
+  "acc_laya": 0.6143410852713178,
+  "acc_majority_vote": 0.7467700258397932,
+  "acc_prob_avg": 0.7532299741602068,
+  "acc_oracle_any": 0.8835917312661499,
+  "balanced_acc_jev": 0.6586468889735873,
+  "balanced_acc_prismnli": 0.48890586044595113,
+  "balanced_acc_laya": 0.4233123251473799
+ }
+}

@@ -135,6 +135,8 @@ plots.py                    PROTOCOL §7 figures (PNG 200 dpi + PDF); scale to 7
 render_plots.py             re-render every figure from results/summary.json + parquet (no model calls)
 supplementary_analysis.py   post-hoc analyses from the frozen predictions -> results/supplementary.json (no model calls)
 cross_dataset_summary.py    aggregate the primary run + results/<dataset>/ -> results/cross_dataset_summary.{csv,json} and results/plots/cross_dataset_accuracy.{png,pdf}
+ensemble_and_balanced.py    post-hoc: majority-vote / probability-average ensembles, any-correct oracle, balanced accuracy -> results/ensemble_and_balanced.json
+supervised_baseline.py      post-hoc reference (not zero-shot): TF-IDF + logistic regression per dataset, temperature-scaled on a held-out slice -> results/supervised_baseline.json
 inspect_sample.py           deterministic 22-row qualitative sample -> results/inspection_sample.{md,json} (no model calls)
 jev_sequential_latency.py   Jev latency at concurrency 1 on validation rows -> results/jev_sequential_latency.json
 models/common.py            LABELS, INSTRUCTION, DEFINITIONS, revisions, Prediction / LoadInfo / Backend (primary benchmark)
@@ -232,6 +234,8 @@ python supplementary_analysis.py                              # -> results/suppl
 python inspect_sample.py                                      # -> results/inspection_sample.{md,json} (from frozen_primary_plain/)
 python render_plots.py                                        # re-render results/plots/ and results/plots/defined/
 python cross_dataset_summary.py                               # -> results/cross_dataset_summary.{csv,json}, results/plots/cross_dataset_accuracy.{png,pdf}
+python ensemble_and_balanced.py                               # -> results/ensemble_and_balanced.json
+python supervised_baseline.py                                 # trains on each dataset's own training split; -> results/supervised_baseline.json
 OPENROUTER_API_KEY=... python jev_sequential_latency.py --n 100   # Jev only; validation rows; -> results/jev_sequential_latency.json
 shasum -a 256 -c results/frozen_primary_plain/SHA256SUMS      # verify the frozen primary snapshot
 ```
@@ -255,6 +259,8 @@ shasum -a 256 -c results/frozen_primary_plain/SHA256SUMS      # verify the froze
 | `run_plain.log` / `run_defined.log` | console logs of the two test-split invocations |
 | `cache/` | Jev response caches (test split: `jev_plain.jsonl`, `jev_defined.jsonl`) and `cache/smoke_validation/`, `cache/seq_latency_validation/` (validation rows only) |
 | `cross_dataset_summary.csv` / `cross_dataset_summary.json` | output of `cross_dataset_summary.py`: one row per dataset x model (n, classes, majority-class accuracy, accuracy and macro-F1 with CIs, Brier, ECE, NLL, mean confidence, exact-zero gold fraction, accuracy at 50%/80% coverage, p50/p95 latency with `latency_kind`, Jev cost) plus all 12 pairwise tests (exact McNemar, paired bootstrap accuracy difference), `pairwise_paired_bootstrap_extra` (paired bootstrap of macro-F1 / Brier / ECE-15 differences, same 10 000 seed-0 resamples) and `prismnli_independent_entailment` (per dataset: share of rows with two or more labels at independent P(entail) > 0.5, mean max P(entail), top predicted label and its share); the figure is `plots/cross_dataset_accuracy.{png,pdf}` |
+| `ensemble_and_balanced.json` | per dataset: majority-class accuracy, per-system accuracy, majority-vote and probability-average ensemble accuracy, any-correct oracle, balanced accuracy (mean per-class recall) per system |
+| `supervised_baseline.json` | TF-IDF + logistic regression trained on the dataset's own training split (emotion: train; tweet_topic: train_2020+train_2021; fin_topic: 90% of train; daily_dialog: train utterances), temperature-scaled on a held-out slice (validation / validation_2021 / 10% of train / validation utterances), evaluated on the same rows as the zero-shot systems; uncalibrated and calibrated accuracy, macro-F1, ECE-15, Brier, NLL, fitted temperature |
 | `<dataset>/` (`tweet_topic/`, `fin_topic/`, `daily_dialog/`) | the same file set (`raw_predictions.parquet`, `summary.json`, `summary.csv`, `env.json`, `plots/`, `cache/`) plus `SHA256SUMS` and `run_plain.log` for each follow-up dataset of `PROTOCOL_ADDENDUM_v2.md`; `summary.*` additionally carry `n_classes` and `majority_class_accuracy`, and `env.json`/`summary.json` embed the full `DatasetSpec` (source, revision, split, labels, instruction, template) plus Laya's applied temperature bucket |
 | `smoke_validation/`, `<dataset>/smoke_<split>/` | outputs of smoke runs (never the evaluated split) |
 
@@ -379,6 +385,125 @@ end-to-end, local p50 is on-device compute (M1 Max, MPS fp32, bs = 1).
 - On emotion only: both rankings survive the `defined` prompt variant (definitions move Jev +0.013 [+0.003, +0.023],
   PrismNLI -0.023 [-0.036, -0.010], Laya +0.011 [-0.006, +0.027]; only Laya's shift is within noise). Local per-example compute on an M1 Max (Laya p50 31 ms, PrismNLI 58 ms)
   is 6-11x below Jev's remote round trip (p50 349 ms), but these are different quantities.
+
+
+### Conclusions and discussion
+
+Everything above is measurement. This section is interpretation, written after all four datasets
+were scored, and it draws on two extra post-hoc analyses that are not part of the frozen comparison:
+`ensemble_and_balanced.py` (majority-vote / probability-average ensembles, any-correct oracle, balanced
+accuracy) and `supervised_baseline.py` (a TF-IDF + logistic-regression model trained on each dataset's
+own training split and temperature-scaled on a held-out slice, evaluated on exactly the same rows).
+Outputs: `results/ensemble_and_balanced.json`, `results/supervised_baseline.json`.
+
+**Which tasks does Jev handle well, and how much is the nature of the task?** On the evidence here,
+the label set matters more than the model family. Where labels are concrete, mutually exclusive
+categories (`tweet_topic`, `fin_topic`: topics of a tweet), Jev is the best zero-shot system by a wide,
+statistically unambiguous margin (16 to 33 accuracy points), it is the only system whose 20-way output
+stays usable, and its probabilities are the best calibrated (ECE 0.063 and 0.166). Where labels are
+affective states that overlap and one of them is "none" (`daily_dialog`, `dair-ai/emotion`), no
+zero-shot system is good: all three are below the majority-class baseline on `daily_dialog`, and on
+`dair-ai/emotion` the NLI model wins, partly or wholly because of its inherited exposure. So the
+answer is "largely the nature of the task": nominal taxonomies suit a native `choice` primitive;
+fuzzy affect labels defeat every zero-shot approach and reward whichever system has seen similar
+data. The design cannot fully separate task type from lineage (the two emotion sets are the two sets
+where PrismNLI has the higher accuracy), so this is a supported reading, not a proof.
+
+**What "majority" means, and are these models an ensemble?** The dotted `maj` line is the
+majority-class baseline: always predict the most frequent label. It is not an ensemble. It matters
+because on `daily_dialog` (81.7% `no emotion`) it beats all three zero-shot systems on accuracy, which
+says that accuracy is the wrong metric there; balanced accuracy (mean per-class recall) puts Jev at
+0.659 against PrismNLI 0.489 and Laya 0.423, and PrismNLI's accuracy edge comes from answering
+`no emotion` on 80.7% of rows. The three systems are also not an ensemble of each other, and combining
+them does not help: a majority vote (ties broken by the most confident system) scores 0.666 / 0.738 /
+0.535 / 0.747 on emotion / `tweet_topic` / `fin_topic` / `daily_dialog`, and averaging the three
+probability vectors 0.674 / 0.744 / 0.548 / 0.753, both below the best single system on every dataset
+(0.725 / 0.793 / 0.670 / 0.765). The any-correct oracle is much higher (0.805 / 0.871 / 0.756 / 0.884),
+so the systems do fail on different rows, but nothing in their confidences tells you which one to trust
+on a given row.
+
+**Pitfalls of zero-shot decision models against a well-calibrated supervised model.** A small
+supervised model with post-hoc temperature scaling, trained on a few thousand labelled rows from each
+dataset, is the honest comparator for anyone who has labels:
+
+| dataset | best zero-shot (acc / macro-F1 / ECE) | TF-IDF + LR, temperature-scaled (acc / macro-F1 / ECE) | train rows |
+|---|---|---|---|
+| emotion | PrismNLI 0.725 / 0.647 / 0.174 | 0.860 / 0.785 / 0.031 | 16 000 |
+| tweet_topic | Jev 0.793 / 0.694 / 0.063 | 0.776 / 0.555 / 0.050 | 4 374 |
+| fin_topic | Jev 0.670 / 0.630 / 0.166 | 0.828 / 0.785 / 0.018 | 15 291 |
+| daily_dialog | PrismNLI 0.765 / Jev 0.385 / Jev 0.156 | 0.848 / 0.367 / 0.035 | 87 170 |
+
+- Accuracy ceiling: on three of four datasets a linear model with labels beats the best zero-shot
+  system by 8 to 16 accuracy points, and its ECE after a one-parameter temperature fit is 0.02 to 0.05
+  on every dataset. Zero-shot decision models are a substitute for labels, not for a trained model.
+- Calibration is not portable. Jev's ECE ranges from 0.063 (`tweet_topic`) to 0.281 (emotion) with no
+  way to know in advance which you will get; Laya's shipped per-option-count temperatures were fit on
+  its own data and produce ECE 0.610 on a 20-label task; PrismNLI's probabilities are adapter-derived.
+  A supervised model is calibrated on your validation split, so its probabilities mean something on
+  your distribution. If you rely on a zero-shot system's confidence for routing, you still need a
+  labelled validation set to check it, which removes part of the "no labels needed" advantage.
+- Labels are prompts. The label string is the model input, and it is fragile: PrismNLI collapses to
+  `Markets` because "The topic of this tweet is Markets." is entailed by almost any finance tweet; one
+  line of definitions moved accuracy by 1 to 2 points in opposite directions for different systems
+  (`defined` variant); Laya's own `BENCHMARKS.md` reports prediction flips from option order alone of 4% on DAIR Emotion and 15% on MASSIVE intent for the English checkpoint. None of
+  this exists for a trained classifier, whose classes are indices.
+- Output format artefacts. Jev returns probabilities rounded to 2 decimals, so 15% of emotion rows and
+  51% of Laya's `fin_topic` rows put exactly zero on the true label; log-loss is then undefined without
+  clipping, and "confidence" from the API is a different quantity from max-probability.
+- Closed weights and moving versions. Jev's architecture, size and training data are undisclosed;
+  the alias `typesafe/jev-1.13` already resolves to a dated snapshot (`-20260917`) two days after
+  release; results cannot be reproduced once the snapshot is retired, data leaves your infrastructure,
+  and end-to-end latency is 330 to 350 ms per decision from this client versus sub-millisecond for a
+  linear model. Contamination is unverifiable for Jev and Laya, so any public-benchmark number for
+  them (including ours) carries an unknown exposure risk.
+- No learning loop. When the model is wrong on your distribution there is no training signal to apply;
+  the only levers are label wording and definitions, which is prompt engineering under another name.
+
+**What these models do well.** No labelled data and no training step: a new label space is a request
+body, and it can change per call. Typed, schema-constrained outputs with a probability per option
+(nothing to parse, no free-text hallucination, and the distribution is at least monotone with
+accuracy: Jev's accuracy among its 50% most confident decisions is 0.954 on `tweet_topic` and 0.828 on
+`fin_topic`). Several questions in one call. Fast and cheap relative to a generative LLM: Jev cost
+$0.015 to $0.020 per 1000 decisions here and answered in about a third of a second. Robustness to
+distribution drift where a trained model degrades: on `tweet_topic`, whose test tweets are a year
+later than its training tweets, zero-shot Jev (0.793) edges the supervised model (0.776) and leads it
+by 14 macro-F1 points. Open-weight alternatives exist (Laya, NLI classifiers) for self-hosting at
+30 to 200 ms per decision on a laptop, with the caveats above.
+
+**Is Jev revolutionary?** Not on this evidence. It is a strong, well-packaged zero-shot classifier:
+it beats a state-of-the-art 0.4B NLI model and the open Laya rebuild by 16 to 33 points on the two
+clean topic sets, with the best calibration of the three and a usable 20-way output. That is a real
+engineering result. It is not a capability jump: it does not beat a TF-IDF model with a few thousand
+labels on three of four datasets; on affect labels it is no better than a 2020-style NLI classifier;
+its calibration is dataset-dependent; and the "System One" framing describes a known idea (zero-shot
+classification with typed outputs, as in the Hugging Face zero-shot pipeline, GLiNER, or
+constrained-decoding classifiers) with better ergonomics, calibration-aware training (RLCD) and an
+aggressive price. Two external facts fit this reading: TechCrunch reports that outside observers
+suspect an open-weight LLM underneath, and JevBench's open Qwen3.5-4B rebuilds land within about one
+point of Jev on its composite score. The novelty is the product surface, not the model. The hedge is
+the scope of this study: four English classification datasets, the `choice` primitive only, one frozen
+prompt per dataset, no `noul` or `score` questions, no long structured state and no multi-question
+calls, which are the settings TypeSafe markets.
+
+**Why Laya's article showed a large win over Jev that does not reproduce.** The Laya card reports
+0.595 (Laya) versus 0.480 (Jev) on DAIR Emotion. We reproduce Laya's number (0.587 on the full 2000
+rows; 0.565 and 0.585 on the authors' 600- and 400-row prefixes) but measure Jev at 0.587, a tie.
+The Jev figure in the article was never measured by the Laya authors: it is copied from a third-party
+pilot (AbdelStark/jev-benchmarks) that scored 100 class-balanced rows with a different prompt and
+label keys. Balanced sampling is the main reason for the gap: our balanced accuracy (mean per-class
+recall) for Jev on this dataset is 0.497, which is what a class-balanced 100-row sample estimates, and
+the article compares that against Laya's natural-distribution accuracy. On the same balanced footing
+Laya scores 0.476, so the two systems are tied either way. The authors do note that "sample sizes and
+prompts differ"; the headline table does not. The follow-up datasets then show that Laya's emotion
+result was the high point: on `tweet_topic` and `fin_topic` it is tied with PrismNLI and 16 to 33
+points behind Jev, on `daily_dialog` it is last, and on 20 labels its shipped temperature makes its
+probabilities unusable. Plausible reasons, none verifiable from the disclosures: a 421M encoder
+fine-tuned for two hours on about a dozen task families, one of which is an undisclosed "emotion and
+tone" corpus that plausibly resembles DAIR-style data; temperature buckets fit on that mix; and
+latency and calibration claims in the article that compare Laya's on-GPU compute time with Jev's
+network round trip, and Laya's post-fit ECE with Jev's raw ECE. Laya is not an open approximation of
+Jev's abstraction so much as a narrow fine-tune whose held-out performance drops outside its training
+families.
 
 **Contamination caveat.** PrismNLI-0.4B was initialised from `deberta-v3-large-zeroshot-v2.0`, whose
 card and harmonisation notebook show verified training exposure to the *train* and *validation*
