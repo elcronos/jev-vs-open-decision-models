@@ -341,7 +341,7 @@ The bound on this conclusion is the PrismNLI contamination finding: its initiali
 
 ## 8. Reproducibility
 
-Commands (from `/Users/camilopestana/Desktop/model_decisions`, venv Python 3.11.6, `OPENROUTER_API_KEY` set for Jev only):
+Commands (from `.`, venv Python 3.11.6, `OPENROUTER_API_KEY` set for Jev only):
 
 ```
 python benchmark.py --split validation --limit 8 --models jev,prismnli,laya --variants plain,defined   # smoke
@@ -358,25 +358,25 @@ Revisions: dataset `dair-ai/emotion` @ `cab853a1dbdf4c42c2b3ef2173804746df8825fe
 Seeds: `random`/`numpy`/`torch` = 0; bootstrap `default_rng(0)`, 10 000 resamples; deterministic algorithms requested.
 
 Files:
-- `/Users/camilopestana/Desktop/model_decisions/PROTOCOL.md` - frozen protocol
-- `/Users/camilopestana/Desktop/model_decisions/results/summary.json`, `summary.csv` - all metrics (both variants)
-- `/Users/camilopestana/Desktop/model_decisions/results/raw_predictions.parquet` - per-row predictions and probabilities
-- `/Users/camilopestana/Desktop/model_decisions/results/env.json` - environment of the last (defined) run
-- `/Users/camilopestana/Desktop/model_decisions/results/frozen_primary_plain/{summary.json,summary.csv,raw_predictions.parquet,env.json,SHA256SUMS}` - checksummed snapshot of the primary `plain` run (SHA-256 of `summary.json` starts `7e739a48`, of `raw_predictions.parquet` starts `956efecf`)
-- `/Users/camilopestana/Desktop/model_decisions/results/supplementary.json` - paired plain/defined tests, confusions, agreement, eps sensitivity, confidence slices, errors at coverage, API-confidence comparison, length effect, sequential latency, cost; paired bootstrap CIs for Brier / ECE-15 / errors-at-coverage differences, accuracy on the first 600 / 400 rows, and the Jev confidence = 1.00 group (all recomputed from `frozen_primary_plain/raw_predictions.parquet`)
-- `/Users/camilopestana/Desktop/model_decisions/results/jev_sequential_latency.json`
-- `/Users/camilopestana/Desktop/model_decisions/results/prismnli_pipeline_check.json`
-- `/Users/camilopestana/Desktop/model_decisions/results/contamination_research.json`
-- `/Users/camilopestana/Desktop/model_decisions/results/inspection_sample.md`, `inspection_sample.json`, `error_analysis.md`
-- `/Users/camilopestana/Desktop/model_decisions/results/run_plain.log`, `run_defined.log`
-- `/Users/camilopestana/Desktop/model_decisions/results/cache/jev_plain.jsonl`, `cache/jev_defined.jsonl` (test-split Jev responses, keyed by `dataset_index`); `cache/smoke_validation/`, `cache/seq_latency_validation/` (validation rows only)
-- `/Users/camilopestana/Desktop/model_decisions/models/{common,jev,laya,prismnli}.py`, `metrics.py`, `plots.py`, `benchmark.py`, `tests/`
+- `./PROTOCOL.md` - frozen protocol
+- `./results/summary.json`, `summary.csv` - all metrics (both variants)
+- `./results/raw_predictions.parquet` - per-row predictions and probabilities
+- `./results/env.json` - environment of the last (defined) run
+- `./results/frozen_primary_plain/{summary.json,summary.csv,raw_predictions.parquet,env.json,SHA256SUMS}` - checksummed snapshot of the primary `plain` run (SHA-256 of `summary.json` starts `7e739a48`, of `raw_predictions.parquet` starts `956efecf`)
+- `./results/supplementary.json` - paired plain/defined tests, confusions, agreement, eps sensitivity, confidence slices, errors at coverage, API-confidence comparison, length effect, sequential latency, cost; paired bootstrap CIs for Brier / ECE-15 / errors-at-coverage differences, accuracy on the first 600 / 400 rows, and the Jev confidence = 1.00 group (all recomputed from `frozen_primary_plain/raw_predictions.parquet`)
+- `./results/jev_sequential_latency.json`
+- `./results/prismnli_pipeline_check.json`
+- `./results/contamination_research.json`
+- `./results/inspection_sample.md`, `inspection_sample.json`, `error_analysis.md`
+- `./results/run_plain.log`, `run_defined.log`
+- `./results/cache/jev_plain.jsonl`, `cache/jev_defined.jsonl` (test-split Jev responses, keyed by `dataset_index`); `cache/smoke_validation/`, `cache/seq_latency_validation/` (validation rows only)
+- `./models/{common,jev,laya,prismnli}.py`, `metrics.py`, `plots.py`, `benchmark.py`, `tests/`
 
 ---
 
 ## 9. Figures
 
-Primary (`plain`) figures under `/Users/camilopestana/Desktop/model_decisions/results/plots/`; `defined` counterparts under `results/plots/defined/` (PNG 200 dpi + PDF).
+Primary (`plain`) figures under `./results/plots/`; `defined` counterparts under `results/plots/defined/` (PNG 200 dpi + PDF).
 
 - `accuracy_macro_f1_ci.png` - accuracy and macro-F1 per model with 95% bootstrap CIs.
 - `per_class_f1.png` - per-class F1 for the six emotions, grouped by model.

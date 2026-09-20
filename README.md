@@ -22,6 +22,50 @@ inference and may not change afterwards; any deviation must be recorded in
 `results/deviations.md`. `models/common.py` holds the shared constants and dataclasses that all
 modules implement against.
 
+## Dataset selection
+
+The benchmark needs one dataset that is fair to all three systems at once: a proprietary
+decision model reached only through an API (Jev), a binary NLI classifier that scores each label
+as a hypothesis (PrismNLI), and an open non-autoregressive typed-decision model with a fixed
+option-token budget (Laya). Candidates were screened before any code was written, using the
+models' own documentation as the source for "in training mix" claims.
+
+| Candidate | Why it was not chosen |
+|---|---|
+| **AG News** (4 topics) | Listed by the Laya authors as *in Laya's training mix*, and used as a zero-shot training/eval set by the `deberta-v3-large-zeroshot` lineage behind PrismNLI. Any lead would be uninterpretable. |
+| **banking77** (77 intents) | 77 options exceed Laya's documented ~20-option `choice` budget (options share a 192-token head budget); the Laya authors themselves report a hard ceiling here. Would measure an architectural limit, not decision quality. |
+| **MASSIVE intent** (60 intents) | Same option-budget problem; also part of Laya's published evaluation suite with routing tuned on it. |
+| **SST-5** (5 ordinal levels) | Ordinal, so the natural Jev/Laya primitive is `score`, not `choice`; PrismNLI has no ordinal primitive, which would force an unfair mapping. |
+| **BoolQ**, **XNLI**, **MNLI/ANLI** | Binary / NLI-shaped tasks: PrismNLI's home turf (and XNLI/BoolQ are in Laya's mix). A two-way task also gives weak resolution on calibration. |
+| **GoEmotions** (27 labels, multi-label) | Multi-label and 27 options: violates the single-`choice` framing and Laya's option budget. |
+| **TweetEval emotion** (4 labels) | Only four classes and a small test split (1,421); less resolution than the six-way task. |
+| **typed-decisions** (Laya's own benchmark) | Laya's `typed-decisions` checkpoint is fine-tuned on its training split, and the general checkpoint is near chance on it by the authors' own account; it is also authored by one of the parties being compared. |
+| **deepset prompt-injections** (binary, n=116) | Far too small for useful confidence intervals. |
+
+**`dair-ai/emotion` (config `split`, official `test`, 2,000 rows, six mutually exclusive labels)
+was selected because it is:**
+
+- small enough to run cheaply (Jev cost for the whole test set was $0.03) yet large enough for
+  useful bootstrap confidence intervals (+/- ~2 points on accuracy);
+- six-way rather than binary, so calibration, selective classification and confusion structure
+  are informative;
+- naturally expressible as one typed `choice` question with the identical six label strings for
+  every system, and as six NLI hypotheses with one fixed template;
+- below Laya's recommended maximum number of `choice` options;
+- reported by the Laya authors as *held out* from Laya's training mix, and not named anywhere in
+  TypeSafe's (undisclosed) training description;
+- not used for any per-model prompt tuning here (the protocol was frozen before test inference).
+
+**What we learned after selection (see `REPORT.md` Section 5).** The contamination research done
+for this report found that PrismNLI-0.4B is initialised from `deberta-v3-large-zeroshot-v2.0`
+(non-`-c` variant), whose published training list includes the *train* and *validation* splits of
+`dair-ai/emotion` (never the test split). That lineage was not visible on the PrismNLI model card
+and was only established by tracing the initialisation checkpoint's dataset CSV and notebooks.
+The dataset was kept because the protocol was already frozen and because the exposure is bounded
+and documented; the report treats PrismNLI's lead as partly non-zero-shot for that reason. A
+follow-up on an emotion dataset absent from the `zeroshot-v2.0` list (the list covers 28 public
+classification sets, so candidates are scarce) is the clean next step.
+
 ## Layout
 
 ```
@@ -145,6 +189,8 @@ probabilities and are counted in `n_errors`. Per PROTOCOL.md §5 all headline me
   NLL clips at 1e-6 and `frac_gold_prob_zero` reports how often it happens.
 - Full package pins are in `requirements.txt`; the exact versions used for a run are in
   `results/env.json`.
+
+- Absolute home-directory paths in `REPORT.md`, `results/env.json`, `results/frozen_primary_plain/env.json` and the run logs were redacted to `.`/`~` before publication; `results/frozen_primary_plain/SHA256SUMS` was regenerated after that edit (the `summary.json` and `raw_predictions.parquet` digests are unchanged).
 
 ## Results
 

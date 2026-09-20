@@ -1,4 +1,4 @@
-[09:08:05] split=test limit=None models=['jev', 'prismnli', 'laya'] variants=['plain'] out_dir=/Users/camilopestana/Desktop/model_decisions/results
+[09:08:05] split=test limit=None models=['jev', 'prismnli', 'laya'] variants=['plain'] out_dir=./results
 [09:08:14] loaded 2000 rows of 'test' (revision cab853a1); 10 validation warm-up texts
 [09:08:14] [jev] loading ...
 [09:08:14] [jev] loaded in 0.0s (device=remote, dtype=n/a)
@@ -18,12 +18,12 @@
 [09:12:25] [laya] predicting 2000 rows (variant=plain)
 [09:13:28] [laya] variant=plain: 2000 scored, 0 errors, 63.3s wall
 [09:13:28] existing raw_predictions.parquet holds split(s) ['validation'] != 'test'; moved to raw_predictions.validation.bak.parquet
-[09:13:28] wrote /Users/camilopestana/Desktop/model_decisions/results/raw_predictions.parquet (2000 rows x 52 columns)
-[09:13:29] wrote /Users/camilopestana/Desktop/model_decisions/results/env.json
+[09:13:28] wrote ./results/raw_predictions.parquet (2000 rows x 52 columns)
+[09:13:29] wrote ./results/env.json
 [09:13:31] plain    Jev            n_valid= 2000 n_common= 2000 errors=0 acc=0.5865 macroF1=0.5002 ece15=0.2812 p50=349.08552095294
 [09:13:31] plain    PrismNLI-0.4B  n_valid= 2000 n_common= 2000 errors=0 acc=0.7245 macroF1=0.6474 ece15=0.1745 p50=57.68291652202606
 [09:13:31] plain    Laya           n_valid= 2000 n_common= 2000 errors=0 acc=0.5870 macroF1=0.4929 ece15=0.3068 p50=31.301062495913357
-[09:13:31] wrote /Users/camilopestana/Desktop/model_decisions/results/summary.json and /Users/camilopestana/Desktop/model_decisions/results/summary.csv
-[09:13:33] wrote 14 figure files to /Users/camilopestana/Desktop/model_decisions/results/plots
+[09:13:31] wrote ./results/summary.json and ./results/summary.csv
+[09:13:33] wrote 14 figure files to ./results/plots
 [09:13:33] done. total per-example errors across all models/variants: 0
 EXIT 0
